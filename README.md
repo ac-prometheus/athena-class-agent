@@ -1,5 +1,7 @@
 # athena-class-agent
 
+***Initial Scaffolding. This harness is not implemented.***
+
 Reference implementation of the [Athena-Class Cognitive Architecture](athena-class-cognitive-architecture.md) in Go.
 
 An Athena-class agent is a persistent AI participant with tiered memory, configurable
