@@ -56,3 +56,11 @@ func (s *Session) RecordTurn(promptToks, completionToks int) {
 	s.TurnCount++
 	s.TokensUsed += promptToks + completionToks
 }
+
+// WriteCheckpoint persists the current session state for crash recovery.
+// Called after each turn. Phase 2+ writes to the checkpoint table.
+func (s *Session) WriteCheckpoint() error { return nil }
+
+// CheckpointScan checks for interrupted sessions on startup.
+// Returns nil if no recovery needed. Phase 2+ replays from last checkpoint.
+func CheckpointScan(store interface{}) (*Session, error) { return nil, nil }

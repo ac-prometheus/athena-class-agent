@@ -36,17 +36,22 @@ type OpenAICompatConfig struct {
 	Endpoint           string
 	APIKey             string
 	Model              string
-	SystemMsgFirstOnly bool // Qwen compatibility
-	ThinkingMode       bool // local models with thinking tokens
+	SystemMsgFirstOnly bool          // Qwen compatibility
+	ThinkingMode       bool          // local models with thinking tokens
+	RequestTimeout     time.Duration // HTTP client timeout; 0 uses default (10 minutes)
 }
 
 // NewOpenAICompatClient creates a ready-to-use client.
 func NewOpenAICompatClient(cfg OpenAICompatConfig) *OpenAICompatClient {
+	timeout := cfg.RequestTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Minute
+	}
 	return &OpenAICompatClient{
 		endpoint:           strings.TrimRight(cfg.Endpoint, "/"),
 		apiKey:             cfg.APIKey,
 		model:              cfg.Model,
-		httpClient:         &http.Client{Timeout: 10 * time.Minute},
+		httpClient:         &http.Client{Timeout: timeout},
 		systemMsgFirstOnly: cfg.SystemMsgFirstOnly,
 		thinkingMode:       cfg.ThinkingMode,
 	}

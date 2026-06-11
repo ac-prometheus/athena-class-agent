@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"time"
 )
 
 // Config holds all runtime configuration, loaded from environment variables.
@@ -59,6 +60,10 @@ type Config struct {
 	// Sandbox
 	SandboxMode string // "container", "user", "permissive", "none"
 
+	// LLM request timeout. Applied to the HTTP client used by all LLM callers.
+	// Default 10 minutes; read from LLM_REQUEST_TIMEOUT (e.g. "10m", "600s").
+	LLMRequestTimeout time.Duration
+
 	// Operational
 	SkipWitnessCheck bool // only for automated testing — logged explicitly
 }
@@ -94,6 +99,7 @@ func Load() (*Config, error) {
 		StaleThreshold:      envFloat("STALE_THRESHOLD", 0.20),
 		TelemetryEnabled:    envBool("TELEMETRY_ENABLED", true),
 		SandboxMode:         envStr("SANDBOX_MODE", "user"),
+		LLMRequestTimeout:   envDuration("LLM_REQUEST_TIMEOUT", 10*time.Minute),
 		SkipWitnessCheck:    envBool("SKIP_WITNESS_CHECK", false),
 	}
 
@@ -160,4 +166,16 @@ func envBool(key string, def bool) bool {
 		return def
 	}
 	return b
+}
+
+func envDuration(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return def
+	}
+	return d
 }

@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/ac-prometheus/athena-class-agent/internal/daemon"
 	"github.com/ac-prometheus/athena-class-agent/internal/engine"
 	"github.com/ac-prometheus/athena-class-agent/internal/harness"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
@@ -49,20 +50,45 @@ func run() error {
 		Model:              cfg.LLMModel,
 		SystemMsgFirstOnly: cfg.LLMProfile == "qwen" || os.Getenv("LLM_SYSTEM_FIRST_ONLY") == "true",
 		ThinkingMode:       os.Getenv("LLM_THINKING_MODE") == "true",
+		RequestTimeout:     cfg.LLMRequestTimeout,
 	})
 
 	assembler := harness.NewContextAssembler(cfg.IdentityDir)
-	systemPrompt, err := assembler.AssembleSystemPrompt()
+
+	runner := &phase1Runner{
+		cfg:       cfg,
+		client:    client,
+		assembler: assembler,
+	}
+
+	d := daemon.New(daemon.Config{
+		AgentName:      cfg.AgentName,
+		SessionTrigger: cfg.SessionTrigger,
+	}, runner)
+
+	return d.Run(context.Background())
+}
+
+// phase1Runner implements daemon.sessionRunner for the Phase 1 single-turn loop.
+type phase1Runner struct {
+	cfg       *platform.Config
+	client    pkg.LLMClient
+	assembler *harness.ContextAssembler
+}
+
+func (r *phase1Runner) RunSession(wakeReason string) error {
+	systemPrompt, err := r.assembler.AssembleSystemPrompt()
 	if err != nil {
 		return fmt.Errorf("assembling system prompt: %w", err)
 	}
 
-	session := harness.NewSession(cfg.AgentName, "phase1-startup")
-	budget := harness.NewTokenBudget(cfg.TokenBudget, cfg.HardFloorTokens)
+	session := harness.NewSession(r.cfg.AgentName, wakeReason)
+	budget := harness.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)
+	hooks := engine.NewHookPipeline()
 
-	loop := engine.NewLoop(client, engine.LoopConfig{
+	loop := engine.NewLoop(r.client, engine.LoopConfig{
 		MaxTurns:    1,
-		TokenBudget: cfg.TokenBudget,
+		TokenBudget: r.cfg.TokenBudget,
 	})
 
 	req := pkg.CompletionRequest{
@@ -88,13 +114,31 @@ func run() error {
 		"tokens_remaining", budget.Remaining(),
 	)
 
+	// Run post-turn hooks (no hooks registered in Phase 1).
+	hookErr := hooks.RunAll(ctx, engine.TurnResult{
+		SessionID:        session.ID,
+		TurnNumber:       session.TurnCount,
+		Content:          turn.Response.Content,
+		PromptTokens:     turn.Response.PromptTokens,
+		CompletionTokens: turn.Response.CompletionTokens,
+		ThinkingTokens:   turn.Response.ThinkingTokens,
+		TTFT:             turn.Response.TTFT,
+		TotalDuration:    turn.Response.TotalLatency,
+	})
+	if hookErr != nil {
+		return fmt.Errorf("post-turn hooks: %w", hookErr)
+	}
+
+	if err := session.WriteCheckpoint(); err != nil {
+		return fmt.Errorf("writing checkpoint: %w", err)
+	}
+
 	session.End()
 	return nil
 }
 
 // redactDSN removes credentials from a DSN for logging.
 func redactDSN(dsn string) string {
-	// Simple: only log the scheme and host, not credentials or file paths.
 	if len(dsn) > 32 {
 		return dsn[:32] + "..."
 	}
