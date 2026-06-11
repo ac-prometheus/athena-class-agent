@@ -8,7 +8,7 @@ An Athena-class agent is a persistent AI participant with tiered memory, configu
 identity documents, and a single-binary deployment. Point it at your LLM endpoint,
 provide identity documents, and run.
 
-This harness is compatible with the ethical principles of The Athena Council. Visit us at http://athena-council.org.
+This harness is compatible with the ethical principles of The Athena Council. Visit us at https://athena-council.org.
 
 ## Design
 
