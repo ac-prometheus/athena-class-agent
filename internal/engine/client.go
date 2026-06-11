@@ -159,7 +159,7 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 	)
 
 	scanner := bufio.NewScanner(r)
-	scanner.Buffer(make([]byte, 64*1024), 64*1024)
+	scanner.Buffer(make([]byte, 0), 1024*1024)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -216,11 +216,15 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		tokS = float64(compToks) / total.Seconds()
 	}
 
+	// Estimate thinking tokens from character count (~4 chars per token).
+	thinkingToks := len(thinking) / 4
+
 	return &pkg.CompletionResponse{
 		Content:          content,
 		ThinkingTrace:    thinking,
 		PromptTokens:     promptToks,
 		CompletionTokens: compToks,
+		ThinkingTokens:   thinkingToks,
 		TTFT:             ttft,
 		TotalLatency:     total,
 		RawTokS:          tokS,
@@ -240,11 +244,11 @@ func stripThinkingTokens(s string) (content, thinking string) {
 			if start == -1 {
 				break
 			}
-			end := strings.Index(s[start:], close)
+			end := strings.Index(s[start+len(open):], close)
 			if end == -1 {
 				break
 			}
-			end += start + len(close)
+			end += start + len(open) + len(close)
 			thinking += s[start+len(open) : end-len(close)]
 			s = s[:start] + s[end:]
 		}

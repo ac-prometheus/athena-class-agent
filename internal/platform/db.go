@@ -3,6 +3,7 @@ package platform
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"strings"
 
 	_ "github.com/lib/pq"
@@ -11,9 +12,9 @@ import (
 
 // Store wraps a *sql.DB with the DSN it was opened from.
 type Store struct {
-	DB      *sql.DB
-	Driver  string // "sqlite3" or "postgres"
-	DSN     string
+	DB     *sql.DB
+	Driver string // "sqlite3" or "postgres"
+	dsn    string
 }
 
 // NewStore opens a database connection from a DSN string.
@@ -39,12 +40,24 @@ func NewStore(dsn string) (*Store, error) {
 		return nil, fmt.Errorf("connecting to %s database: %w", driver, err)
 	}
 
-	return &Store{DB: db, Driver: driver, DSN: rawDSN}, nil
+	return &Store{DB: db, Driver: driver, dsn: rawDSN}, nil
 }
 
 // Close closes the underlying database connection.
 func (s *Store) Close() error {
 	return s.DB.Close()
+}
+
+// RedactedDSN returns the DSN with any password replaced by ***.
+func (s *Store) RedactedDSN() string {
+	u, err := url.Parse(s.dsn)
+	if err != nil {
+		return "[unparseable DSN]"
+	}
+	if u.User != nil {
+		u.User = url.UserPassword(u.User.Username(), "***")
+	}
+	return u.String()
 }
 
 // parseDSN splits a DSN into (driver, raw-dsn).

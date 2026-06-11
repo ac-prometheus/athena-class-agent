@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"os"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/daemon"
@@ -139,8 +140,12 @@ func (r *phase1Runner) RunSession(wakeReason string) error {
 
 // redactDSN removes credentials from a DSN for logging.
 func redactDSN(dsn string) string {
-	if len(dsn) > 32 {
-		return dsn[:32] + "..."
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return "[unparseable DSN]"
 	}
-	return dsn
+	if u.User != nil {
+		u.User = url.UserPassword(u.User.Username(), "***")
+	}
+	return u.String()
 }

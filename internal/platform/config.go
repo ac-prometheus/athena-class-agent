@@ -2,6 +2,7 @@ package platform
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"strconv"
 	"time"
@@ -106,6 +107,9 @@ func Load() (*Config, error) {
 	if err := c.validate(); err != nil {
 		return nil, fmt.Errorf("config validation: %w", err)
 	}
+	if c.SkipWitnessCheck {
+		slog.Warn("witness check bypassed via SKIP_WITNESS_CHECK — this should only be used during development")
+	}
 	return c, nil
 }
 
@@ -121,6 +125,12 @@ func (c *Config) validate() error {
 	}
 	if c.HardFloorTokens <= 0 {
 		return fmt.Errorf("HARD_FLOOR_TOKENS must be positive")
+	}
+	if c.HardFloorTokens >= c.TokenBudget {
+		slog.Error("HARD_FLOOR_TOKENS >= TOKEN_BUDGET — resetting to defaults",
+			"hard_floor", c.HardFloorTokens, "token_budget", c.TokenBudget)
+		c.TokenBudget = 200000
+		c.HardFloorTokens = 1500
 	}
 	return nil
 }

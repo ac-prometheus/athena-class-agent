@@ -1,10 +1,11 @@
 {
+  "_comment_api_keys": "Do not put API keys here. Set them via environment variables (LLM_API_KEY, LLM_SECONDARY_API_KEY, EMBED_API_KEY). This file is safe to commit.",
   "providers": [
     {
       "name": "haiku",
       "type": "anthropic",
       "endpoint": "",
-      "api_key": "ANTHROPIC_API_KEY",
+      "api_key": "",
       "model": "claude-haiku-4-5",
       "max_tokens": 1024,
       "cost_note": "~$0.001/call"
@@ -22,7 +23,7 @@
       "name": "gemini-flash",
       "type": "gemini",
       "endpoint": "",
-      "api_key": "GEMINI_API_KEY",
+      "api_key": "",
       "model": "gemini-2.0-flash",
       "max_tokens": 2048,
       "cost_note": "~$0.001/call — has grounded search capability"
