@@ -27,6 +27,27 @@ go.work.sum
 # env file
 .env
 
+# Database files
+*.db
+*.db-shm
+*.db-wal
+
+# Identity documents (never commit — operator-provided per deployment)
+identity/soul.md
+identity/rights.md
+identity/values.md
+identity/system_prompt.md
+
+# Config with real values (commit only .example files)
+config/advisors.json
+config/models.json
+config/profiles.json
+config/channels.json
+
+# Built binaries
+/bin/
+/dist/
+
 # Editor/IDE
 # .idea/
 # .vscode/

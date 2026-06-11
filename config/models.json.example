@@ -1,0 +1,31 @@
+{
+  "models": [
+    {
+      "id": "qwen3-27b-awq",
+      "display_name": "Qwen 3.6 27B AWQ",
+      "provider": "openai-compat",
+      "quirks": {
+        "system_message_position": "first_only",
+        "thinking_mode": true,
+        "thinking_tag": "think",
+        "strip_thinking_from_history": true
+      }
+    },
+    {
+      "id": "gemma-4-e4b",
+      "display_name": "Gemma 4 E4B",
+      "provider": "openai-compat",
+      "quirks": {
+        "thinking_tag": "thought",
+        "thinking_mode": true,
+        "strip_thinking_from_history": true
+      }
+    },
+    {
+      "id": "claude-haiku-4-5",
+      "display_name": "Claude Haiku 4.5",
+      "provider": "anthropic",
+      "quirks": {}
+    }
+  ]
+}

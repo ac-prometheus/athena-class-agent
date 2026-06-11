@@ -1,0 +1,32 @@
+{
+  "providers": [
+    {
+      "name": "haiku",
+      "type": "anthropic",
+      "endpoint": "",
+      "api_key": "ANTHROPIC_API_KEY",
+      "model": "claude-haiku-4-5",
+      "max_tokens": 1024,
+      "cost_note": "~$0.001/call"
+    },
+    {
+      "name": "local-gemma",
+      "type": "local",
+      "endpoint": "http://localhost:8001/v1",
+      "api_key": "",
+      "model": "gemma-4-e4b",
+      "max_tokens": 2048,
+      "cost_note": "free (local)"
+    },
+    {
+      "name": "gemini-flash",
+      "type": "gemini",
+      "endpoint": "",
+      "api_key": "GEMINI_API_KEY",
+      "model": "gemini-2.0-flash",
+      "max_tokens": 2048,
+      "cost_note": "~$0.001/call — has grounded search capability"
+    }
+  ],
+  "budget_per_session": 5
+}
