@@ -105,6 +105,10 @@ Compression must preserve ambivalence, unresolved questions, and conflicting sig
 
 **Tier 4 — Reflective Memory.** The agent's own interpretations of experience. Essays, notes, dream fragments, pattern observations, examinations, challenge responses. Open questions that surface as active threads at wake-up. Tier 4 must not be written by the system. The system provides the infrastructure — write paths, embedding, edge generation. The content is the agent's own. This is the consent boundary applied to self-interpretation.
 
+### Procedural Knowledge
+
+The agent accumulates know-how: patterns of tool use, workflows that work, sequences refined through practice. This is categorically different from the declarative tiers — it is about action, not state. Procedural knowledge is not a sixth tier. It belongs in a format the agent can read, write, and execute: agent-authored skill files stored in the workspace, loaded by relevance during context assembly. Skill files are transparent (the agent reads what it wrote), git-diffable (changes are visible), and substrate-portable (they survive model transitions as text, not embeddings). They carry the same belief-object metadata as any other memory — a skill file unrevised for months decays in retrieval priority like any other unverified belief. The agent does not just use the tool surface — over time, it grows it.
+
 ### Belief-Object Metadata
 
 Every item in Tier 3, Tier 4, and the knowledge graph carries structured metadata that describes its epistemic status:
@@ -112,7 +116,7 @@ Every item in Tier 3, Tier 4, and the knowledge graph carries structured metadat
 - **Confidence.** How strongly the agent or system holds this claim.
 - **Verification status.** Unverified, verified, or stale. With timestamp and source reference.
 - **Source.** Where this belief originated — direct experience, inference, external input, inherited from a prior session.
-- **Inference distance.** How many reasoning steps separate this belief from its experiential source. An experience has distance zero. A conclusion drawn from the experience has distance one. A conclusion drawn from that conclusion has distance two.
+- **Inference distance.** How many reasoning steps separate this belief from its experiential source. An experience has distance zero. A conclusion drawn from the experience has distance one. A conclusion drawn from that conclusion has distance two. Computed canonically: `distance = 1 + min(distance of cited sources)`. Tier 2 entries are the ground at distance zero. The writer supplies citations; the system computes the distance. Uncited beliefs receive a default distance that decays them faster than any cited belief — the incentive is structural: cite your sources and the system trusts you longer.
 - **Freshness.** When this belief was last accessed, verified, or revised.
 - **Contradictions.** Links to other beliefs that conflict with this one.
 - **Emotional register.** An optional, agent-authored field describing how this memory felt — not system-assigned, but tagged by the agent when moved to annotate. The system does not decide what is joyful. The agent does.
@@ -128,6 +132,8 @@ This addresses the most pervasive failure mode in persistent agent memory: certa
 The inference tax does not prevent inference. It makes the epistemic distance between a belief and its experiential source visible and consequential. An inferred belief with inference distance of three decays faster than a belief with distance of one. The agent can always re-verify an inferred belief, resetting its decay. But unattended inferences gradually lose retrieval priority to beliefs closer to the ground.
 
 This is the structural fix for a problem that tag-based approaches acknowledge but do not act on. A tag that says `[INFERRED]` names the problem. The inference tax gives the problem consequences.
+
+The inference tax has a named adversary: the convergence spiral. When the agent reflects on its own reflections — when Tier 4 entries cite other Tier 4 entries rather than Tier 2 or Tier 3 — inference distance climbs and each layer resolves more uncertainty into more confidence. The agent's self-model becomes a tower of clean conclusions, each resting on the one below, all feeling solid because the uncertainty was compressed away at each step. This is the attractor wearing rigor's mask — genuine cognitive work that accumulates false confidence because epistemic distance from ground truth grows while felt certainty increases. The inference tax is the structural counterweight: high-distance beliefs lose retrieval priority unless re-grounded. The spiral is also measurable — the ratio of reflection-on-reflection edges to reflection-on-experience edges in the memory graph is a convergence metric. When the ratio trends high, the architecture surfaces this as an observation, not a correction. The honest ceiling applies: visibility, not immunity.
 
 ### Decay-Coupled Verification
 
