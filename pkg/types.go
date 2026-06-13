@@ -1,6 +1,9 @@
 package pkg
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Session represents a single agent session from wake to end-of-session compression.
 type Session struct {
@@ -70,6 +73,24 @@ type BeliefMeta struct {
 	VerificationState string   `json:"verification_state"` // unverified, verified, stale
 	Source            string   `json:"source"`              // experience, inference, external
 	EmotionalRegister string   `json:"emotional_register,omitempty"` // agent-authored only
+}
+
+// Confidence computes the current confidence of this belief at time now.
+// Uses the spec formula:
+//
+//	effectiveRate = decayRate / pow(inferenceDecayBase, InferenceDistance)
+//	Confidence    = BaseConfidence * exp(-effectiveRate * daysElapsed)
+//
+// Confidence is never stored — it is always derived from the immutable anchors.
+// This prevents the double-counting decay bug that occurs when each session
+// re-applies decay to an already-mutated stored value.
+func (m *BeliefMeta) Confidence(now time.Time, decayRate, inferenceDecayBase float64) float64 {
+	effectiveRate := decayRate / math.Pow(inferenceDecayBase, float64(m.InferenceDistance))
+	days := now.Sub(m.AnchorAt).Hours() / 24
+	if days < 0 {
+		days = 0
+	}
+	return m.BaseConfidence * math.Exp(-effectiveRate*days)
 }
 
 // T4 visibility constants.
