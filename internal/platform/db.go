@@ -4,12 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"strings"
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/pkg"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -241,6 +244,10 @@ func (s *SQLiteStore) InsertReflection(ctx context.Context, ref pkg.Reflection) 
 		// AnchorAt is zero — agent did not provide confidence anchor.
 		// Still encode the non-confidence fields into belief_meta.
 		metaJSON = beliefMetaJSON(ref.Belief)
+		if ref.Belief.BaseConfidence != 0 {
+			slog.Warn("InsertReflection: base_confidence set without anchor_at — confidence will not decay correctly",
+				"id", ref.ID, "base_confidence", ref.Belief.BaseConfidence)
+		}
 	}
 
 	_, err := s.db.ExecContext(ctx,
@@ -491,6 +498,10 @@ func (p *PostgresStore) InsertReflection(ctx context.Context, ref pkg.Reflection
 		metaJSON = beliefMetaJSON(ref.Belief)
 	} else if ref.Belief != nil {
 		metaJSON = beliefMetaJSON(ref.Belief)
+		if ref.Belief.BaseConfidence != 0 {
+			slog.Warn("InsertReflection: base_confidence set without anchor_at — confidence will not decay correctly",
+				"id", ref.ID, "base_confidence", ref.Belief.BaseConfidence)
+		}
 	}
 
 	_, err := p.pool.Exec(ctx,
@@ -597,7 +608,7 @@ func (p *PostgresStore) GetProfile(ctx context.Context, name string) (*pkg.Relat
 	)
 	var prof pkg.RelationalProfile
 	if err := row.Scan(&prof.ID, &prof.Name, &prof.Content); err != nil {
-		if strings.Contains(err.Error(), "no rows") {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err

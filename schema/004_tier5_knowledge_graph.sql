@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS kg_relationships (
     to_entity           TEXT        NOT NULL REFERENCES kg_entities(id),
     relation_type       TEXT        NOT NULL DEFAULT '',
     summary             TEXT        NOT NULL DEFAULT '',
+    -- belief_meta: relationships are beliefs too.
+    -- JSON object with BeliefMeta anchors (same structure as kg_entities.belief_meta).
+    belief_meta         JSONB       NOT NULL DEFAULT '{}',
     -- Bi-temporal columns
     t_created           TIMESTAMPTZ NOT NULL DEFAULT now(),
     t_valid             TIMESTAMPTZ,

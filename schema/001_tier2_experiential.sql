@@ -24,9 +24,10 @@ CREATE TABLE IF NOT EXISTS experiential_logs (
     --   search-result  — content from a search API response
     --   forum-content  — content from a forum adapter
     content_source   TEXT        NOT NULL DEFAULT 'self',
-    -- embedding_pending tracks whether the background embedder has processed this entry.
-    -- T2 rows are written immediately; the background goroutine backfills embeddings
-    -- into T3 summaries when compression runs. This flag gates the compression queue.
+    -- embedding_pending: set TRUE on insert; cleared by the T2→T3 compression pipeline
+    -- (Phase 2 internal/memory/tier3.go) when the entry has been summarised into a
+    -- narrative_summaries row and an embedding backfilled. The background EmbedWorker
+    -- queries WHERE embedding_pending = TRUE to identify unprocessed entries.
     embedding_pending BOOLEAN    NOT NULL DEFAULT TRUE,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );

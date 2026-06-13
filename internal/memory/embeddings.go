@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/pkg"
@@ -236,12 +237,36 @@ func EmbedWorker(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider
 	}
 }
 
+// placeholder returns the SQL placeholder for positional argument n (1-based)
+// appropriate for the given driver: "?" for sqlite3, "$N" for postgres.
+func placeholder(driverName string, n int) string {
+	if driverName == "postgres" {
+		return fmt.Sprintf("$%d", n)
+	}
+	return "?"
+}
+
+// driverNameOf returns the driver name reported by the *sql.DB.
+func driverNameOf(db *sql.DB) string {
+	switch db.Driver().(type) {
+	default:
+		// Inspect the type name as a fallback for drivers that don't expose
+		// a named type we can switch on directly.
+		name := fmt.Sprintf("%T", db.Driver())
+		if strings.Contains(name, "postgres") || strings.Contains(name, "pgx") {
+			return "postgres"
+		}
+		return "sqlite3"
+	}
+}
+
 // processPendingT3 embeds narrative_summaries rows where embedding IS NULL.
 func processPendingT3(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, batch int) error {
+	ph := placeholder(driverNameOf(db), 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, content FROM narrative_summaries
 		 WHERE embedding IS NULL
-		 ORDER BY created_at ASC LIMIT ?`, batch,
+		 ORDER BY created_at ASC LIMIT `+ph, batch,
 	)
 	if err != nil {
 		return err
@@ -253,10 +278,11 @@ func processPendingT3(ctx context.Context, db *sql.DB, provider pkg.EmbeddingPro
 
 // processPendingT4 embeds reflections rows where embedding IS NULL.
 func processPendingT4(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, batch int) error {
+	ph := placeholder(driverNameOf(db), 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, content FROM reflections
 		 WHERE embedding IS NULL
-		 ORDER BY created_at ASC LIMIT ?`, batch,
+		 ORDER BY created_at ASC LIMIT `+ph, batch,
 	)
 	if err != nil {
 		return err
@@ -268,10 +294,11 @@ func processPendingT4(ctx context.Context, db *sql.DB, provider pkg.EmbeddingPro
 
 // processPendingT5 embeds kg_entities rows where embedding IS NULL.
 func processPendingT5(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, batch int) error {
+	ph := placeholder(driverNameOf(db), 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, summary FROM kg_entities
 		 WHERE embedding IS NULL
-		 ORDER BY t_created ASC LIMIT ?`, batch,
+		 ORDER BY t_created ASC LIMIT `+ph, batch,
 	)
 	if err != nil {
 		return err
@@ -317,8 +344,9 @@ func embedRows(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, 
 			continue
 		}
 
+		driver := driverNameOf(db)
 		if _, err := db.ExecContext(ctx,
-			`UPDATE `+table+` SET embedding = ? WHERE id = ?`,
+			`UPDATE `+table+` SET embedding = `+placeholder(driver, 1)+` WHERE id = `+placeholder(driver, 2),
 			string(vecJSON), item.id,
 		); err != nil {
 			slog.Error("embed worker: updating embedding", "table", table, "id", item.id, "err", err)
