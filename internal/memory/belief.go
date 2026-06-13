@@ -140,20 +140,18 @@ func parseBeliefMeta(metaJSON string) *pkg.BeliefMeta {
 func loadBeliefRecords(ctx context.Context, db beliefDB) ([]BeliefRecord, error) {
 	var records []BeliefRecord
 
-	tables := []struct {
+	// T3 and T5: belief_meta JSONB contains BaseConfidence (system-set).
+	for _, t := range []struct {
 		table string
 		tier  int
 	}{
 		{"narrative_summaries", 3},
-		{"reflections", 4},
 		{"kg_entities", 5},
-	}
-
-	for _, t := range tables {
+	} {
 		rows, err := db.QueryContext(ctx,
 			`SELECT id, belief_meta FROM `+t.table+`
 			 WHERE belief_meta != '{}' AND belief_meta != ''
-			   AND (belief_meta NOT LIKE '%"verification_state":"stale"%')`,
+			   AND belief_meta NOT LIKE '%"verification_state":"stale"%'`,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("belief: querying %s: %w", t.table, err)
@@ -174,6 +172,41 @@ func loadBeliefRecords(ctx context.Context, db beliefDB) ([]BeliefRecord, error)
 		rows.Close()
 		if err := rows.Err(); err != nil {
 			return nil, fmt.Errorf("belief: iterating %s: %w", t.table, err)
+		}
+	}
+
+	// T4: base_confidence lives in its own column (consent boundary).
+	// If NULL (agent hasn't set it), skip — can't compute staleness without an anchor.
+	// If set, use it. The system never writes this value, only reads it here.
+	{
+		rows, err := db.QueryContext(ctx,
+			`SELECT id, belief_meta, base_confidence FROM reflections
+			 WHERE base_confidence IS NOT NULL
+			   AND belief_meta != '{}' AND belief_meta != ''
+			   AND belief_meta NOT LIKE '%"verification_state":"stale"%'`,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("belief: querying reflections: %w", err)
+		}
+
+		for rows.Next() {
+			var id, metaJSON string
+			var baseConf float64
+			if err := rows.Scan(&id, &metaJSON, &baseConf); err != nil {
+				rows.Close()
+				return nil, fmt.Errorf("belief: scanning reflections row: %w", err)
+			}
+			belief := parseBeliefMeta(metaJSON)
+			belief.BaseConfidence = baseConf
+			records = append(records, BeliefRecord{
+				ID:        id,
+				Belief:    belief,
+				TableName: "reflections",
+			})
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return nil, fmt.Errorf("belief: iterating reflections: %w", err)
 		}
 	}
 
