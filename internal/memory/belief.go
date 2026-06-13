@@ -39,7 +39,8 @@ type beliefDB interface {
 // the minimum number of hops from this record to a T2 (direct experience) source.
 // T2 entries have distance 0. A record with no edges defaults to distance 1
 // (live-session default for un-cited claims).
-func ComputeInferenceDistance(ctx context.Context, db beliefDB, recordID string) (int, error) {
+// driverName must be "sqlite3" or "postgres".
+func ComputeInferenceDistance(ctx context.Context, db beliefDB, driverName, recordID string) (int, error) {
 	// BFS: find all nodes reachable via derived_from edges, tracking depth.
 	visited := map[string]bool{recordID: true}
 	queue := []string{recordID}
@@ -50,7 +51,7 @@ func ComputeInferenceDistance(ctx context.Context, db beliefDB, recordID string)
 		for _, id := range queue {
 			rows, err := db.QueryContext(ctx,
 				`SELECT to_id, to_tier FROM memory_edges
-				 WHERE from_id = ? AND edge_type = 'derived_from'`,
+				 WHERE from_id = `+placeholder(driverName, 1)+` AND edge_type = 'derived_from'`,
 				id,
 			)
 			if err != nil {
@@ -88,7 +89,8 @@ func ComputeInferenceDistance(ctx context.Context, db beliefDB, recordID string)
 // RunEndOfSessionDecay is a wrapper around FlagStaleBeliefs from retrieve.go.
 // It loads all T3/T4/T5 records with belief_meta, runs the staleness pass,
 // and returns the count of newly-flagged records. Idempotent.
-func RunEndOfSessionDecay(ctx context.Context, db beliefDB, _ pkg.MemoryStore, now time.Time, cfg DecayConfig) (int, error) {
+// driverName must be "sqlite3" or "postgres".
+func RunEndOfSessionDecay(ctx context.Context, db beliefDB, driverName string, _ pkg.MemoryStore, now time.Time, cfg DecayConfig) (int, error) {
 	records, err := loadBeliefRecords(ctx, db)
 	if err != nil {
 		return 0, fmt.Errorf("belief: loading records for decay pass: %w", err)
@@ -96,7 +98,7 @@ func RunEndOfSessionDecay(ctx context.Context, db beliefDB, _ pkg.MemoryStore, n
 
 	updateFn := func(ctx context.Context, table, id, state string) error {
 		_, err := db.ExecContext(ctx,
-			`UPDATE `+table+` SET belief_meta = json_set(belief_meta, '$.verification_state', ?) WHERE id = ?`,
+			`UPDATE `+table+` SET belief_meta = json_set(belief_meta, '$.verification_state', `+placeholder(driverName, 1)+`) WHERE id = `+placeholder(driverName, 2),
 			state, id,
 		)
 		return err

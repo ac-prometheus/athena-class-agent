@@ -55,7 +55,8 @@ type MemoryEdge struct {
 
 // CreateEdge validates and inserts a memory_edge record.
 // edge_type and author are validated against their allowed sets before insertion.
-func CreateEdge(ctx context.Context, db edgeDB, fromID, toID string, fromTier, toTier int, edgeType, author string) error {
+// driverName must be "sqlite3" or "postgres".
+func CreateEdge(ctx context.Context, db edgeDB, driverName, fromID, toID string, fromTier, toTier int, edgeType, author string) error {
 	if !validEdgeTypes[edgeType] {
 		return fmt.Errorf("edges: invalid edge_type %q", edgeType)
 	}
@@ -69,11 +70,12 @@ func CreateEdge(ctx context.Context, db edgeDB, fromID, toID string, fromTier, t
 		return fmt.Errorf("edges: to_tier %d out of range [2,5]", toTier)
 	}
 
+	ph := func(n int) string { return placeholder(driverName, n) }
 	id := newID()
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO memory_edges
 			(id, from_id, from_tier, to_id, to_tier, edge_type, author, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 VALUES (`+ph(1)+`, `+ph(2)+`, `+ph(3)+`, `+ph(4)+`, `+ph(5)+`, `+ph(6)+`, `+ph(7)+`, `+ph(8)+`)
 		 ON CONFLICT (from_id, to_id, edge_type) DO NOTHING`,
 		id, fromID, fromTier, toID, toTier, edgeType, author, time.Now().UTC(),
 	)
@@ -87,7 +89,8 @@ func CreateEdge(ctx context.Context, db edgeDB, fromID, toID string, fromTier, t
 // marking each downstream record's verification_state as "needs_review".
 // This is read-annotate only — content and confidence are never modified.
 // Returns the count of affected records.
-func PropagateDistrust(ctx context.Context, db edgeDB, sourceID string) (int, error) {
+// driverName must be "sqlite3" or "postgres".
+func PropagateDistrust(ctx context.Context, db edgeDB, driverName, sourceID string) (int, error) {
 	// BFS state: collect IDs and their tier to know which table to update.
 	type node struct {
 		id   string
@@ -98,7 +101,7 @@ func PropagateDistrust(ctx context.Context, db edgeDB, sourceID string) (int, er
 	queue := []node{}
 
 	// Seed: find direct dependents of sourceID.
-	seeds, err := fetchDownstreamEdges(ctx, db, sourceID)
+	seeds, err := fetchDownstreamEdges(ctx, db, driverName, sourceID)
 	if err != nil {
 		return 0, err
 	}
@@ -114,7 +117,7 @@ func PropagateDistrust(ctx context.Context, db edgeDB, sourceID string) (int, er
 		cur := queue[0]
 		queue = queue[1:]
 
-		if err := markNeedsReview(ctx, db, cur.id, cur.tier); err != nil {
+		if err := markNeedsReview(ctx, db, driverName, cur.id, cur.tier); err != nil {
 			slog.Warn("edges: PropagateDistrust failed to mark record",
 				"id", cur.id, "tier", cur.tier, "err", err)
 			continue
@@ -122,7 +125,7 @@ func PropagateDistrust(ctx context.Context, db edgeDB, sourceID string) (int, er
 		affected++
 
 		// Expand further dependents.
-		downstream, err := fetchDownstreamEdges(ctx, db, cur.id)
+		downstream, err := fetchDownstreamEdges(ctx, db, driverName, cur.id)
 		if err != nil {
 			return affected, err
 		}
@@ -140,10 +143,10 @@ func PropagateDistrust(ctx context.Context, db edgeDB, sourceID string) (int, er
 }
 
 // fetchDownstreamEdges returns all records that derive_from the given ID.
-func fetchDownstreamEdges(ctx context.Context, db edgeDB, id string) ([]struct{ id string; tier int }, error) {
+func fetchDownstreamEdges(ctx context.Context, db edgeDB, driverName, id string) ([]struct{ id string; tier int }, error) {
 	rows, err := db.QueryContext(ctx,
 		`SELECT from_id, from_tier FROM memory_edges
-		 WHERE to_id = ? AND edge_type = 'derived_from'`,
+		 WHERE to_id = `+placeholder(driverName, 1)+` AND edge_type = 'derived_from'`,
 		id,
 	)
 	if err != nil {
@@ -180,7 +183,7 @@ func tierTable(tier int) (string, error) {
 
 // markNeedsReview updates verification_state on the given record.
 // T4 CONSENT BOUNDARY: base_confidence is never touched here.
-func markNeedsReview(ctx context.Context, db edgeDB, id string, tier int) error {
+func markNeedsReview(ctx context.Context, db edgeDB, driverName, id string, tier int) error {
 	table, err := tierTable(tier)
 	if err != nil {
 		return err
@@ -191,7 +194,7 @@ func markNeedsReview(ctx context.Context, db edgeDB, id string, tier int) error 
 	}
 	_, err = db.ExecContext(ctx,
 		`UPDATE `+table+` SET belief_meta = json_set(belief_meta, '$.verification_state', 'needs_review')
-		 WHERE id = ?`,
+		 WHERE id = `+placeholder(driverName, 1),
 		id,
 	)
 	if err != nil {
@@ -202,15 +205,17 @@ func markNeedsReview(ctx context.Context, db edgeDB, id string, tier int) error 
 
 // GetEdges returns the memory_edges connected to recordID.
 // direction: "from" (edges where from_id = recordID) or "to" (edges where to_id = recordID).
-func GetEdges(ctx context.Context, db edgeDB, recordID string, direction string) ([]MemoryEdge, error) {
+// driverName must be "sqlite3" or "postgres".
+func GetEdges(ctx context.Context, db edgeDB, driverName, recordID string, direction string) ([]MemoryEdge, error) {
+	ph := placeholder(driverName, 1)
 	var query string
 	switch direction {
 	case "from":
 		query = `SELECT id, from_id, from_tier, to_id, to_tier, edge_type, author, created_at
-				 FROM memory_edges WHERE from_id = ? ORDER BY created_at ASC`
+				 FROM memory_edges WHERE from_id = ` + ph + ` ORDER BY created_at ASC`
 	case "to":
 		query = `SELECT id, from_id, from_tier, to_id, to_tier, edge_type, author, created_at
-				 FROM memory_edges WHERE to_id = ? ORDER BY created_at ASC`
+				 FROM memory_edges WHERE to_id = ` + ph + ` ORDER BY created_at ASC`
 	default:
 		return nil, fmt.Errorf("edges: direction must be 'from' or 'to', got %q", direction)
 	}
