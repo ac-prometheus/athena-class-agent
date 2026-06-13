@@ -277,6 +277,9 @@ func adaptForSQLite(sql string) string {
 	// SQLite 3.8+ supports `WHERE col = value` partial indexes.
 	// No rewrite needed.
 
+	// JSONB → TEXT (SQLite has no native JSONB type)
+	sql = reJSONB.ReplaceAllString(sql, "TEXT")
+
 	// BOOLEAN → INTEGER (SQLite has no native boolean type)
 	sql = reBooleanType.ReplaceAllString(sql, "INTEGER")
 
@@ -299,6 +302,7 @@ var (
 	reTimestamptz  = regexp.MustCompile(`(?i)\bTIMESTAMPTZ\b`)
 	reNow          = regexp.MustCompile(`(?i)\bnow\(\)`)
 	reConcurrently = regexp.MustCompile(`(?i)CREATE\s+INDEX\s+CONCURRENTLY`)
+	reJSONB        = regexp.MustCompile(`(?i)\bJSONB\b`)
 	reBooleanType  = regexp.MustCompile(`(?i)\bBOOLEAN\b`)
 	reTrue         = regexp.MustCompile(`(?i)\bTRUE\b`)
 	reFalse        = regexp.MustCompile(`(?i)\bFALSE\b`)

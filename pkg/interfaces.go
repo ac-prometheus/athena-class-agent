@@ -59,6 +59,7 @@ type NarrativeSummary struct {
 // Reflection is a T4 agent-authored reflection.
 type Reflection struct {
 	ID         string
+	Type       string // reflection_type: essay, note, dream, pattern, examination, challenge
 	Content    string
 	Visibility string // VisibilityPrivate or VisibilityShared
 	Belief     *BeliefMeta

@@ -96,6 +96,16 @@ func NewMemoryStore(ctx context.Context, dsn string) (pkg.MemoryStore, error) {
 }
 
 // beliefMetaJSON encodes a BeliefMeta into the belief_meta JSON column format.
+// escapeLike escapes % and _ in a LIKE pattern argument so they are treated
+// as literals rather than wildcards. Callers must also append ESCAPE '\' to
+// the SQL predicate when using this function.
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, "%", `\%`)
+	s = strings.ReplaceAll(s, "_", `\_`)
+	return s
+}
+
 // base_confidence is excluded — it lives in its own column on T3/T5,
 // and in its own nullable column on T4 (never system-set).
 func beliefMetaJSON(b *pkg.BeliefMeta) string {
@@ -250,11 +260,16 @@ func (s *SQLiteStore) InsertReflection(ctx context.Context, ref pkg.Reflection) 
 		}
 	}
 
+	refType := ref.Type
+	if refType == "" {
+		refType = "note"
+	}
+
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO reflections
 			(id, reflection_type, content, base_confidence, belief_meta, visibility, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-		ref.ID, "note", ref.Content, baseConf, metaJSON, visibility,
+		ref.ID, refType, ref.Content, baseConf, metaJSON, visibility,
 	)
 	return err
 }
@@ -292,11 +307,11 @@ func (s *SQLiteStore) SearchReflections(ctx context.Context, _ []float32, limit 
 
 // SearchEntities returns T5 entities matching the query string (simple LIKE).
 func (s *SQLiteStore) SearchEntities(ctx context.Context, query string, limit int) ([]pkg.Entity, error) {
-	like := "%" + query + "%"
+	like := "%" + escapeLike(query) + "%"
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, name, entity_type, summary, belief_meta
 		 FROM kg_entities
-		 WHERE (name LIKE ? OR summary LIKE ?) AND t_expired IS NULL
+		 WHERE (name LIKE ? ESCAPE '\' OR summary LIKE ? ESCAPE '\') AND t_expired IS NULL
 		 ORDER BY t_created DESC LIMIT ?`,
 		like, like, limit,
 	)
@@ -355,8 +370,8 @@ func (s *SQLiteStore) UpsertEntity(ctx context.Context, entity pkg.Entity) error
 func (s *SQLiteStore) GetProfile(ctx context.Context, name string) (*pkg.RelationalProfile, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT id, name, content FROM relational_profiles
-		 WHERE name = ? OR aliases LIKE ? LIMIT 1`,
-		name, "%"+name+"%",
+		 WHERE name = ? OR aliases LIKE ? ESCAPE '\' LIMIT 1`,
+		name, "%"+escapeLike(name)+"%",
 	)
 	var p pkg.RelationalProfile
 	if err := row.Scan(&p.ID, &p.Name, &p.Content); err != nil {
@@ -504,11 +519,16 @@ func (p *PostgresStore) InsertReflection(ctx context.Context, ref pkg.Reflection
 		}
 	}
 
+	refType := ref.Type
+	if refType == "" {
+		refType = "note"
+	}
+
 	_, err := p.pool.Exec(ctx,
 		`INSERT INTO reflections
 			(id, reflection_type, content, base_confidence, belief_meta, visibility, created_at)
 		 VALUES ($1, $2, $3, $4, $5::jsonb, $6, now())`,
-		ref.ID, "note", ref.Content, baseConf, metaJSON, visibility,
+		ref.ID, refType, ref.Content, baseConf, metaJSON, visibility,
 	)
 	return err
 }
@@ -541,7 +561,7 @@ func (p *PostgresStore) SearchReflections(ctx context.Context, _ []float32, limi
 
 // SearchEntities returns T5 entities matching the query string.
 func (p *PostgresStore) SearchEntities(ctx context.Context, query string, limit int) ([]pkg.Entity, error) {
-	like := "%" + query + "%"
+	like := "%" + escapeLike(query) + "%"
 	rows, err := p.pool.Query(ctx,
 		`SELECT id, name, entity_type, summary, belief_meta::text
 		 FROM kg_entities
@@ -604,7 +624,7 @@ func (p *PostgresStore) GetProfile(ctx context.Context, name string) (*pkg.Relat
 	row := p.pool.QueryRow(ctx,
 		`SELECT id, name, content FROM relational_profiles
 		 WHERE name = $1 OR aliases::text ILIKE $2 LIMIT 1`,
-		name, "%"+name+"%",
+		name, "%"+escapeLike(name)+"%",
 	)
 	var prof pkg.RelationalProfile
 	if err := row.Scan(&prof.ID, &prof.Name, &prof.Content); err != nil {
