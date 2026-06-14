@@ -2,10 +2,10 @@ package memory
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"time"
 
+	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -36,26 +36,21 @@ func AppendLog(ctx context.Context, store pkg.MemoryStore, entry pkg.Experientia
 	return store.AppendExperiential(ctx, entry)
 }
 
-// t2Store is the subset of DB operations needed by QueryLogs.
-// Defined here so callers can pass a *sql.DB directly without breaking
-// the MemoryStore abstraction boundary.
-type t2Store interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
-}
-
 // QueryLogs retrieves T2 entries for a session, ordered oldest-first.
 // This is the feed that CompressSession consumes to produce T3 summaries.
-func QueryLogs(ctx context.Context, db t2Store, sessionID string, limit int) ([]pkg.ExperientialLog, error) {
+func QueryLogs(ctx context.Context, db platform.DB, driverName string, sessionID string, limit int) ([]pkg.ExperientialLog, error) {
 	if limit <= 0 {
 		limit = 200
 	}
 
+	ph := func(n int) string { return placeholder(driverName, n) }
+
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, session_id, content, content_source, created_at
 		 FROM experiential_logs
-		 WHERE session_id = ?
+		 WHERE session_id = `+ph(1)+`
 		 ORDER BY created_at ASC
-		 LIMIT ?`,
+		 LIMIT `+ph(2),
 		sessionID, limit,
 	)
 	if err != nil {
