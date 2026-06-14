@@ -752,14 +752,18 @@ func (s *SQLiteStore) InvalidateRelationship(ctx context.Context, relID string, 
 }
 
 // InsertSupersedgesEdge inserts the supersedes memory_edge for SupersedeEntity.
-func (s *SQLiteStore) InsertSupersedgesEdge(ctx context.Context, edgeID, newEntityID, oldID string, now time.Time) error {
-	_, err := s.db.ExecContext(ctx,
+// Returns (1, nil) on success, (0, err) on failure.
+func (s *SQLiteStore) InsertSupersedgesEdge(ctx context.Context, edgeID, newEntityID, oldID string, now time.Time) (int64, error) {
+	res, err := s.db.ExecContext(ctx,
 		`INSERT INTO memory_edges
 			(id, from_id, from_tier, to_id, to_tier, edge_type, author, created_at)
 		 VALUES (?, ?, 5, ?, 5, 'supersedes', 'system', ?)`,
 		edgeID, newEntityID, oldID, now.UTC(),
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }
 
 // CreateEdge inserts a memory_edge record. Duplicate (from_id, to_id, edge_type) is silently ignored.
@@ -1022,14 +1026,18 @@ func (p *PostgresStore) InvalidateRelationship(ctx context.Context, relID string
 }
 
 // InsertSupersedgesEdge inserts the supersedes memory_edge for SupersedeEntity.
-func (p *PostgresStore) InsertSupersedgesEdge(ctx context.Context, edgeID, newEntityID, oldID string, now time.Time) error {
-	_, err := p.pool.Exec(ctx,
+// Returns (1, nil) on success, (0, err) on failure.
+func (p *PostgresStore) InsertSupersedgesEdge(ctx context.Context, edgeID, newEntityID, oldID string, now time.Time) (int64, error) {
+	tag, err := p.pool.Exec(ctx,
 		`INSERT INTO memory_edges
 			(id, from_id, from_tier, to_id, to_tier, edge_type, author, created_at)
 		 VALUES ($1, $2, 5, $3, 5, 'supersedes', 'system', $4)`,
 		edgeID, newEntityID, oldID, now.UTC(),
 	)
-	return err
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 // CreateEdge inserts a memory_edge record. Duplicate (from_id, to_id, edge_type) is silently ignored.

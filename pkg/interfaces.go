@@ -151,7 +151,7 @@ type BeliefRecord struct {
 type KGMutationStore interface {
 	InvalidateEntity(ctx context.Context, entityID string, now time.Time) (int64, error)
 	InvalidateRelationship(ctx context.Context, relID string, now time.Time) (int64, error)
-	InsertSupersedgesEdge(ctx context.Context, edgeID, newEntityID, oldID string, now time.Time) error
+	InsertSupersedgesEdge(ctx context.Context, edgeID, newEntityID, oldID string, now time.Time) (int64, error)
 }
 
 // T2QueryStore handles T2 session log retrieval.

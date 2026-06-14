@@ -61,7 +61,7 @@ func SupersedeEntity(
 	}
 
 	edgeID := newID()
-	if err := kg.InsertSupersedgesEdge(ctx, edgeID, newEntity.ID, oldID, now); err != nil {
+	if _, err := kg.InsertSupersedgesEdge(ctx, edgeID, newEntity.ID, oldID, now); err != nil {
 		return fmt.Errorf("tier5: writing supersedes edge: %w", err)
 	}
 	return nil
