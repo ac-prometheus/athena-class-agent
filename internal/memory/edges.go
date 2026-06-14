@@ -111,21 +111,6 @@ func PropagateDistrust(ctx context.Context, store pkg.EdgeStore, beliefs pkg.Bel
 	return affected, nil
 }
 
-// tierTable maps tier number to DB table name.
-func tierTable(tier int) (string, error) {
-	switch tier {
-	case 2:
-		return "experiential_logs", nil
-	case 3:
-		return "narrative_summaries", nil
-	case 4:
-		return "reflections", nil
-	case 5:
-		return "kg_entities", nil
-	default:
-		return "", fmt.Errorf("edges: unknown tier %d", tier)
-	}
-}
 
 // GetEdges returns the memory_edges connected to recordID.
 // direction: "from" (edges where from_id = recordID) or "to" (edges where to_id = recordID).

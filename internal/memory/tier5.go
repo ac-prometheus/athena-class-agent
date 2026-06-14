@@ -39,15 +39,13 @@ func InvalidateRelationship(ctx context.Context, store pkg.KGMutationStore, relI
 // memory_edge linking them. The edge preserves the audit chain so the old belief
 // can always be traced from the new one.
 //
-// Takes three stores:
-//   - kg pkg.KGMutationStore — for invalidating the old entity and inserting the edge
+// Takes two stores:
+//   - kg pkg.KGMutationStore — for invalidating the old entity and inserting the supersedes edge
 //   - mem pkg.MemoryStore — for upserting the new entity
-//   - _ pkg.EdgeStore — reserved; supersedes edge is written via KGMutationStore.InsertSupersedgesEdge
 func SupersedeEntity(
 	ctx context.Context,
 	kg pkg.KGMutationStore,
 	mem pkg.MemoryStore,
-	_ pkg.EdgeStore,
 	oldID string,
 	newEntity pkg.Entity,
 	now time.Time,

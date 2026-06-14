@@ -669,23 +669,9 @@ func TestEdgeAuthorValidationRejectsInvalid(t *testing.T) {
 	}
 }
 
-// TestTierTableValidBounds verifies that tiers [2,5] are all valid in tierTable,
-// which is the same range CreateEdge enforces.
-func TestTierTableValidBounds(t *testing.T) {
-	for _, tier := range []int{2, 3, 4, 5} {
-		if _, err := tierTable(tier); err != nil {
-			t.Errorf("tier %d should be valid in tierTable, got: %v", tier, err)
-		}
-	}
-}
-
-func TestTierTableInvalidBounds(t *testing.T) {
-	for _, tier := range []int{0, 1, 6, 7, -1, 100} {
-		if _, err := tierTable(tier); err == nil {
-			t.Errorf("tier %d should be invalid in tierTable", tier)
-		}
-	}
-}
+// tierTable tests removed — function moved to platform/db.go as part of
+// the repository pattern refactor. Tier range validation is now enforced
+// by the store implementations, not by memory-layer code.
 
 // ---------------------------------------------------------------------------
 // 6. FlagStaleBeliefs idempotency
