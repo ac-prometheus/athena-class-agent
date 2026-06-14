@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 )
 
 // Edge type constants — must match the CHECK constraint in schema/005_memory_edges.sql.
@@ -38,7 +40,7 @@ var validEdgeAuthors = map[string]bool{
 // Kept separate from MemoryStore because the edge table is not part of that interface.
 type edgeDB interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryContext(ctx context.Context, query string, args ...any) (platform.Rows, error)
 }
 
 // MemoryEdge is the in-memory representation of a memory_edges row.
@@ -193,9 +195,9 @@ func markNeedsReview(ctx context.Context, db edgeDB, driverName, id string, tier
 		return nil
 	}
 	_, err = db.ExecContext(ctx,
-		`UPDATE `+table+` SET belief_meta = json_set(belief_meta, '$.verification_state', 'needs_review')
-		 WHERE id = `+placeholder(driverName, 1),
-		id,
+		`UPDATE `+table+` SET belief_meta = `+jsonUpdate(driverName, "belief_meta", "$.verification_state", placeholder(driverName, 1))+
+			` WHERE id = `+placeholder(driverName, 2),
+		"needs_review", id,
 	)
 	if err != nil {
 		return fmt.Errorf("edges: marking needs_review on %s.%s: %w", table, id, err)

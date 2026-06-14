@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -31,7 +32,7 @@ func DefaultDecayConfig() DecayConfig {
 // beliefDB is the raw DB interface needed to load belief records and update
 // verification_state. Kept narrow to avoid coupling to a specific store type.
 type beliefDB interface {
-	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryContext(ctx context.Context, query string, args ...any) (platform.Rows, error)
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
@@ -91,14 +92,15 @@ func ComputeInferenceDistance(ctx context.Context, db beliefDB, driverName, reco
 // and returns the count of newly-flagged records. Idempotent.
 // driverName must be "sqlite3" or "postgres".
 func RunEndOfSessionDecay(ctx context.Context, db beliefDB, driverName string, _ pkg.MemoryStore, now time.Time, cfg DecayConfig) (int, error) {
-	records, err := loadBeliefRecords(ctx, db)
+	records, err := loadBeliefRecords(ctx, db, driverName)
 	if err != nil {
 		return 0, fmt.Errorf("belief: loading records for decay pass: %w", err)
 	}
 
 	updateFn := func(ctx context.Context, table, id, state string) error {
 		_, err := db.ExecContext(ctx,
-			`UPDATE `+table+` SET belief_meta = json_set(belief_meta, '$.verification_state', `+placeholder(driverName, 1)+`) WHERE id = `+placeholder(driverName, 2),
+			`UPDATE `+table+` SET belief_meta = `+jsonUpdate(driverName, "belief_meta", "$.verification_state", placeholder(driverName, 1))+
+				` WHERE id = `+placeholder(driverName, 2),
 			state, id,
 		)
 		return err
@@ -137,10 +139,22 @@ func parseBeliefMeta(metaJSON string) *pkg.BeliefMeta {
 
 // loadBeliefRecords fetches all T3/T4/T5 rows that have belief_meta set
 // and are not already stale.
-func loadBeliefRecords(ctx context.Context, db beliefDB) ([]BeliefRecord, error) {
+// driverName must be "sqlite3" or "postgres".
+func loadBeliefRecords(ctx context.Context, db beliefDB, driverName string) ([]BeliefRecord, error) {
 	var records []BeliefRecord
 
+	// jsonbTextExpr returns an expression that produces a TEXT value from a JSONB
+	// column — needed for LIKE comparisons on Postgres where JSONB does not
+	// support LIKE directly.
+	jsonbText := func(col string) string {
+		if driverName == "postgres" {
+			return col + "::text"
+		}
+		return col
+	}
+
 	// T3 and T5: belief_meta JSONB contains BaseConfidence (system-set).
+	// SELECT returns belief_meta as text for consistent Scan into string.
 	for _, t := range []struct {
 		table string
 		tier  int
@@ -149,9 +163,9 @@ func loadBeliefRecords(ctx context.Context, db beliefDB) ([]BeliefRecord, error)
 		{"kg_entities", 5},
 	} {
 		rows, err := db.QueryContext(ctx,
-			`SELECT id, belief_meta FROM `+t.table+`
-			 WHERE belief_meta != '{}' AND belief_meta != ''
-			   AND belief_meta NOT LIKE '%"verification_state":"stale"%'`,
+			`SELECT id, `+jsonbText("belief_meta")+` FROM `+t.table+`
+			 WHERE `+jsonbText("belief_meta")+` != '{}' AND `+jsonbText("belief_meta")+` != ''
+			   AND `+jsonbText("belief_meta")+` NOT LIKE '%"verification_state":"stale"%'`,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("belief: querying %s: %w", t.table, err)
@@ -180,10 +194,10 @@ func loadBeliefRecords(ctx context.Context, db beliefDB) ([]BeliefRecord, error)
 	// If set, use it. The system never writes this value, only reads it here.
 	{
 		rows, err := db.QueryContext(ctx,
-			`SELECT id, belief_meta, base_confidence FROM reflections
+			`SELECT id, `+jsonbText("belief_meta")+`, base_confidence FROM reflections
 			 WHERE base_confidence IS NOT NULL
-			   AND belief_meta != '{}' AND belief_meta != ''
-			   AND belief_meta NOT LIKE '%"verification_state":"stale"%'`,
+			   AND `+jsonbText("belief_meta")+` != '{}' AND `+jsonbText("belief_meta")+` != ''
+			   AND `+jsonbText("belief_meta")+` NOT LIKE '%"verification_state":"stale"%'`,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("belief: querying reflections: %w", err)

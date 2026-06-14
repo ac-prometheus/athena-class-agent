@@ -3,15 +3,14 @@ package memory
 import (
 	"bytes"
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"strings"
 	"time"
 
+	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -207,8 +206,9 @@ func DefaultEmbedWorkerConfig() EmbedWorkerConfig {
 //
 // For T3/T4/T5 rows, the worker updates the embedding column directly.
 //
-// Call Run in a goroutine; cancel ctx to stop.
-func EmbedWorker(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, cfg EmbedWorkerConfig) {
+// driverName must be "sqlite3" or "postgres".
+// Call in a goroutine; cancel ctx to stop.
+func EmbedWorker(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, cfg EmbedWorkerConfig) {
 	if cfg.BatchSize <= 0 {
 		cfg.BatchSize = 20
 	}
@@ -224,13 +224,13 @@ func EmbedWorker(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if err := processPendingT3(ctx, db, provider, cfg.BatchSize); err != nil {
+			if err := processPendingT3(ctx, db, driverName, provider, cfg.BatchSize); err != nil {
 				slog.Error("embed worker: T3 batch failed", "err", err)
 			}
-			if err := processPendingT4(ctx, db, provider, cfg.BatchSize); err != nil {
+			if err := processPendingT4(ctx, db, driverName, provider, cfg.BatchSize); err != nil {
 				slog.Error("embed worker: T4 batch failed", "err", err)
 			}
-			if err := processPendingT5(ctx, db, provider, cfg.BatchSize); err != nil {
+			if err := processPendingT5(ctx, db, driverName, provider, cfg.BatchSize); err != nil {
 				slog.Error("embed worker: T5 batch failed", "err", err)
 			}
 		}
@@ -246,23 +246,33 @@ func placeholder(driverName string, n int) string {
 	return "?"
 }
 
-// driverNameOf returns the driver name reported by the *sql.DB.
-func driverNameOf(db *sql.DB) string {
-	switch db.Driver().(type) {
-	default:
-		// Inspect the type name as a fallback for drivers that don't expose
-		// a named type we can switch on directly.
-		name := fmt.Sprintf("%T", db.Driver())
-		if strings.Contains(name, "postgres") || strings.Contains(name, "pgx") {
-			return "postgres"
+// jsonUpdate returns a SQL expression that sets a JSON path to a value.
+// Postgres uses jsonb_set; SQLite uses json_set.
+//
+//	col      — the column name (e.g. "belief_meta")
+//	path     — JSON path in $.key notation (e.g. "$.verification_state")
+//	valuePH  — the already-rendered placeholder for the value arg (e.g. "$1" or "?")
+//
+// The returned expression replaces the column in a SET clause:
+//
+//	UPDATE t SET belief_meta = <jsonUpdate(...)> WHERE ...
+func jsonUpdate(driverName, col, path, valuePH string) string {
+	if driverName == "postgres" {
+		// jsonb_set(col, '{key}', to_jsonb(valuePH::text))
+		// path "$.verification_state" → '{verification_state}'
+		key := path
+		if len(key) > 2 && key[:2] == "$." {
+			key = "{" + key[2:] + "}"
 		}
-		return "sqlite3"
+		return "jsonb_set(" + col + ", '" + key + "', to_jsonb(" + valuePH + "::text))"
 	}
+	// SQLite: json_set(col, '$.key', value)
+	return "json_set(" + col + ", '" + path + "', " + valuePH + ")"
 }
 
 // processPendingT3 embeds narrative_summaries rows where embedding IS NULL.
-func processPendingT3(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, batch int) error {
-	ph := placeholder(driverNameOf(db), 1)
+func processPendingT3(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, batch int) error {
+	ph := placeholder(driverName, 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, content FROM narrative_summaries
 		 WHERE embedding IS NULL
@@ -273,12 +283,12 @@ func processPendingT3(ctx context.Context, db *sql.DB, provider pkg.EmbeddingPro
 	}
 	defer rows.Close()
 
-	return embedRows(ctx, db, provider, rows, "narrative_summaries")
+	return embedRows(ctx, db, driverName, provider, rows, "narrative_summaries")
 }
 
 // processPendingT4 embeds reflections rows where embedding IS NULL.
-func processPendingT4(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, batch int) error {
-	ph := placeholder(driverNameOf(db), 1)
+func processPendingT4(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, batch int) error {
+	ph := placeholder(driverName, 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, content FROM reflections
 		 WHERE embedding IS NULL
@@ -289,12 +299,12 @@ func processPendingT4(ctx context.Context, db *sql.DB, provider pkg.EmbeddingPro
 	}
 	defer rows.Close()
 
-	return embedRows(ctx, db, provider, rows, "reflections")
+	return embedRows(ctx, db, driverName, provider, rows, "reflections")
 }
 
 // processPendingT5 embeds kg_entities rows where embedding IS NULL.
-func processPendingT5(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, batch int) error {
-	ph := placeholder(driverNameOf(db), 1)
+func processPendingT5(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, batch int) error {
+	ph := placeholder(driverName, 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, summary FROM kg_entities
 		 WHERE embedding IS NULL
@@ -305,13 +315,13 @@ func processPendingT5(ctx context.Context, db *sql.DB, provider pkg.EmbeddingPro
 	}
 	defer rows.Close()
 
-	return embedRows(ctx, db, provider, rows, "kg_entities")
+	return embedRows(ctx, db, driverName, provider, rows, "kg_entities")
 }
 
 // embedRows iterates a (id, content) result set and backfills embeddings.
 // The embedding is stored as a JSON-encoded float32 array (TEXT column on SQLite,
 // vector column on Postgres — the column type is handled by the migration runner).
-func embedRows(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, rows *sql.Rows, table string) error {
+func embedRows(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, rows platform.Rows, table string) error {
 	type pending struct {
 		id      string
 		content string
@@ -344,9 +354,8 @@ func embedRows(ctx context.Context, db *sql.DB, provider pkg.EmbeddingProvider, 
 			continue
 		}
 
-		driver := driverNameOf(db)
 		if _, err := db.ExecContext(ctx,
-			`UPDATE `+table+` SET embedding = `+placeholder(driver, 1)+` WHERE id = `+placeholder(driver, 2),
+			`UPDATE `+table+` SET embedding = `+placeholder(driverName, 1)+` WHERE id = `+placeholder(driverName, 2),
 			string(vecJSON), item.id,
 		); err != nil {
 			slog.Error("embed worker: updating embedding", "table", table, "id", item.id, "err", err)

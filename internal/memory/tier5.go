@@ -19,9 +19,12 @@ type t5Store interface {
 // InvalidateEntity sets t_expired on an entity without deleting it.
 // Bi-temporal design: we record when the agent stopped believing the entity,
 // not when it ceased to exist in the world (that's t_invalid).
-func InvalidateEntity(ctx context.Context, db t5Store, entityID string, now time.Time) error {
+// driverName must be "sqlite3" or "postgres".
+func InvalidateEntity(ctx context.Context, db t5Store, driverName, entityID string, now time.Time) error {
+	ph := placeholder(driverName, 1)
+	ph2 := placeholder(driverName, 2)
 	res, err := db.ExecContext(ctx,
-		`UPDATE kg_entities SET t_expired = ? WHERE id = ? AND t_expired IS NULL`,
+		`UPDATE kg_entities SET t_expired = `+ph+` WHERE id = `+ph2+` AND t_expired IS NULL`,
 		now.UTC(), entityID,
 	)
 	if err != nil {
@@ -36,9 +39,12 @@ func InvalidateEntity(ctx context.Context, db t5Store, entityID string, now time
 
 // InvalidateRelationship sets t_expired on a relationship without deleting it
 // or creating a successor. Used when a relationship simply ends.
-func InvalidateRelationship(ctx context.Context, db t5Store, relID string, now time.Time) error {
+// driverName must be "sqlite3" or "postgres".
+func InvalidateRelationship(ctx context.Context, db t5Store, driverName, relID string, now time.Time) error {
+	ph := placeholder(driverName, 1)
+	ph2 := placeholder(driverName, 2)
 	res, err := db.ExecContext(ctx,
-		`UPDATE kg_relationships SET t_expired = ? WHERE id = ? AND t_expired IS NULL`,
+		`UPDATE kg_relationships SET t_expired = `+ph+` WHERE id = `+ph2+` AND t_expired IS NULL`,
 		now.UTC(), relID,
 	)
 	if err != nil {
@@ -54,15 +60,17 @@ func InvalidateRelationship(ctx context.Context, db t5Store, relID string, now t
 // SupersedeEntity invalidates oldID, inserts newEntity, and writes a supersedes
 // memory_edge linking them. The edge preserves the audit chain so the old belief
 // can always be traced from the new one.
+// driverName must be "sqlite3" or "postgres".
 func SupersedeEntity(
 	ctx context.Context,
 	db t5Store,
+	driverName string,
 	store pkg.MemoryStore,
 	oldID string,
 	newEntity pkg.Entity,
 	now time.Time,
 ) error {
-	if err := InvalidateEntity(ctx, db, oldID, now); err != nil {
+	if err := InvalidateEntity(ctx, db, driverName, oldID, now); err != nil {
 		return err
 	}
 
@@ -71,10 +79,11 @@ func SupersedeEntity(
 	}
 
 	edgeID := newID()
+	ph := func(n int) string { return placeholder(driverName, n) }
 	_, err := db.ExecContext(ctx,
 		`INSERT INTO memory_edges
 			(id, from_id, from_tier, to_id, to_tier, edge_type, author, created_at)
-		 VALUES (?, ?, 5, ?, 5, 'supersedes', 'system', ?)`,
+		 VALUES (`+ph(1)+`, `+ph(2)+`, 5, `+ph(3)+`, 5, 'supersedes', 'system', `+ph(4)+`)`,
 		edgeID, newEntity.ID, oldID, now.UTC(),
 	)
 	if err != nil {
