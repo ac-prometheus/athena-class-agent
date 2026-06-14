@@ -1,6 +1,9 @@
 package pkg
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // LLMClient is the interface all LLM provider implementations must satisfy.
 // Embedding is intentionally NOT on this interface — it is async and off the hot path.
@@ -83,6 +86,79 @@ type RelationalProfile struct {
 	Aliases   []string
 	Content   string
 	Embedding []float32
+}
+
+// MemoryEdge is the in-memory representation of a memory_edges row.
+// Moved here from internal/memory/edges.go because callers outside the
+// memory package need the type (e.g. handlers that display provenance).
+type MemoryEdge struct {
+	ID        string
+	FromID    string
+	FromTier  int
+	ToID      string
+	ToTier    int
+	EdgeType  string
+	Author    string
+	CreatedAt time.Time
+}
+
+// EdgeNode is a minimal struct for BFS traversal over memory_edges.
+// Used by EdgeStore.FetchDownstreamEdges and BeliefStore.QueryEdgesForBFS.
+type EdgeNode struct {
+	ID   string
+	Tier int
+}
+
+// EdgeStore handles memory_edges persistence.
+// Separate from MemoryStore because edges span all tiers and are
+// not a memory-retrieval concern — they are a provenance/audit concern.
+type EdgeStore interface {
+	CreateEdge(ctx context.Context, fromID, toID string, fromTier, toTier int, edgeType, author string) error
+	GetEdges(ctx context.Context, recordID, direction string) ([]MemoryEdge, error)
+	// FetchDownstreamEdges returns records that derive_from the given ID (downstream,
+	// for trust propagation). Queries memory_edges WHERE to_id = id AND edge_type = 'derived_from'.
+	// See also BeliefStore.QueryEdgesForBFS, which queries upstream (from_id = id) for
+	// inference distance computation — both query memory_edges but serve different callers.
+	FetchDownstreamEdges(ctx context.Context, id string) ([]EdgeNode, error)
+}
+
+// BeliefStore handles belief-state queries and updates across T3/T4/T5.
+// Separate because belief operations cross table boundaries and require
+// driver-specific JSON column handling (jsonb_set vs json_set).
+type BeliefStore interface {
+	LoadBeliefRecords(ctx context.Context) ([]BeliefRecord, error)
+	UpdateVerificationState(ctx context.Context, table, id, state string) error
+	// QueryEdgesForBFS queries upstream edges (from_id = id) for inference distance
+	// computation in ComputeInferenceDistance. Queries memory_edges WHERE from_id = id
+	// AND edge_type = 'derived_from'. See also EdgeStore.FetchDownstreamEdges, which
+	// queries downstream (to_id = id) for trust propagation — different caller, different direction.
+	QueryEdgesForBFS(ctx context.Context, id string) ([]EdgeNode, error)
+	MarkNeedsReview(ctx context.Context, id string, tier int) error
+}
+
+// BeliefRecord is a minimal struct for the staleness-flagging pass.
+// Moved here from internal/memory/retrieve.go so BeliefStore can reference
+// it without an import cycle.
+type BeliefRecord struct {
+	ID        string
+	Belief    *BeliefMeta
+	TableName string
+}
+
+// KGMutationStore handles bi-temporal knowledge graph writes
+// not covered by MemoryStore.UpsertEntity.
+// Methods return (int64, error) so callers can distinguish "not found" from "failed".
+type KGMutationStore interface {
+	InvalidateEntity(ctx context.Context, entityID string, now time.Time) (int64, error)
+	InvalidateRelationship(ctx context.Context, relID string, now time.Time) (int64, error)
+	InsertSupersedgesEdge(ctx context.Context, edgeID, newEntityID, oldID string, now time.Time) (int64, error)
+}
+
+// T2QueryStore handles T2 session log retrieval.
+// AppendExperiential is already on MemoryStore; this covers the read path
+// that CompressSession uses (QueryLogs is not on the main interface).
+type T2QueryStore interface {
+	QueryLogs(ctx context.Context, sessionID string, limit int) ([]ExperientialLog, error)
 }
 
 // MemoryStore is the interface for all persistent memory operations.

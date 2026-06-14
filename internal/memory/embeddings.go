@@ -237,42 +237,19 @@ func EmbedWorker(ctx context.Context, db platform.DB, driverName string, provide
 	}
 }
 
-// placeholder returns the SQL placeholder for positional argument n (1-based)
-// appropriate for the given driver: "?" for sqlite3, "$N" for postgres.
-func placeholder(driverName string, n int) string {
+// embedPlaceholder returns the SQL placeholder for positional argument n (1-based).
+// Local copy for the embed worker, which operates directly on platform.DB.
+// The canonical copy lives in platform/db.go; this avoids a cross-package dependency.
+func embedPlaceholder(driverName string, n int) string {
 	if driverName == "postgres" {
 		return fmt.Sprintf("$%d", n)
 	}
 	return "?"
 }
 
-// jsonUpdate returns a SQL expression that sets a JSON path to a value.
-// Postgres uses jsonb_set; SQLite uses json_set.
-//
-//	col      — the column name (e.g. "belief_meta")
-//	path     — JSON path in $.key notation (e.g. "$.verification_state")
-//	valuePH  — the already-rendered placeholder for the value arg (e.g. "$1" or "?")
-//
-// The returned expression replaces the column in a SET clause:
-//
-//	UPDATE t SET belief_meta = <jsonUpdate(...)> WHERE ...
-func jsonUpdate(driverName, col, path, valuePH string) string {
-	if driverName == "postgres" {
-		// jsonb_set(col, '{key}', to_jsonb(valuePH::text))
-		// path "$.verification_state" → '{verification_state}'
-		key := path
-		if len(key) > 2 && key[:2] == "$." {
-			key = "{" + key[2:] + "}"
-		}
-		return "jsonb_set(" + col + ", '" + key + "', to_jsonb(" + valuePH + "::text))"
-	}
-	// SQLite: json_set(col, '$.key', value)
-	return "json_set(" + col + ", '" + path + "', " + valuePH + ")"
-}
-
 // processPendingT3 embeds narrative_summaries rows where embedding IS NULL.
 func processPendingT3(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, batch int) error {
-	ph := placeholder(driverName, 1)
+	ph := embedPlaceholder(driverName, 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, content FROM narrative_summaries
 		 WHERE embedding IS NULL
@@ -288,7 +265,7 @@ func processPendingT3(ctx context.Context, db platform.DB, driverName string, pr
 
 // processPendingT4 embeds reflections rows where embedding IS NULL.
 func processPendingT4(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, batch int) error {
-	ph := placeholder(driverName, 1)
+	ph := embedPlaceholder(driverName, 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, content FROM reflections
 		 WHERE embedding IS NULL
@@ -304,7 +281,7 @@ func processPendingT4(ctx context.Context, db platform.DB, driverName string, pr
 
 // processPendingT5 embeds kg_entities rows where embedding IS NULL.
 func processPendingT5(ctx context.Context, db platform.DB, driverName string, provider pkg.EmbeddingProvider, batch int) error {
-	ph := placeholder(driverName, 1)
+	ph := embedPlaceholder(driverName, 1)
 	rows, err := db.QueryContext(ctx,
 		`SELECT id, summary FROM kg_entities
 		 WHERE embedding IS NULL
@@ -355,7 +332,7 @@ func embedRows(ctx context.Context, db platform.DB, driverName string, provider 
 		}
 
 		if _, err := db.ExecContext(ctx,
-			`UPDATE `+table+` SET embedding = `+placeholder(driverName, 1)+` WHERE id = `+placeholder(driverName, 2),
+			`UPDATE `+table+` SET embedding = `+embedPlaceholder(driverName, 1)+` WHERE id = `+embedPlaceholder(driverName, 2),
 			string(vecJSON), item.id,
 		); err != nil {
 			slog.Error("embed worker: updating embedding", "table", table, "id", item.id, "err", err)
