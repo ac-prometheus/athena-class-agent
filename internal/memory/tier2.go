@@ -3,9 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
-	"time"
 
-	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -13,12 +11,12 @@ import (
 // Enforcement here prevents invalid provenance data from entering the archive,
 // which would break MemoryTrap back-tracing and T3 audit chains.
 var validContentSources = map[string]bool{
-	"operator":       true,
-	"self":           true,
-	"tool-result":    true,
+	"operator":        true,
+	"self":            true,
+	"tool-result":     true,
 	"browser-content": true,
-	"search-result":  true,
-	"forum-content":  true,
+	"search-result":   true,
+	"forum-content":   true,
 }
 
 // AppendLog validates and appends a T2 experiential log entry.
@@ -38,35 +36,9 @@ func AppendLog(ctx context.Context, store pkg.MemoryStore, entry pkg.Experientia
 
 // QueryLogs retrieves T2 entries for a session, ordered oldest-first.
 // This is the feed that CompressSession consumes to produce T3 summaries.
-func QueryLogs(ctx context.Context, db platform.DB, driverName string, sessionID string, limit int) ([]pkg.ExperientialLog, error) {
+func QueryLogs(ctx context.Context, store pkg.T2QueryStore, sessionID string, limit int) ([]pkg.ExperientialLog, error) {
 	if limit <= 0 {
 		limit = 200
 	}
-
-	ph := func(n int) string { return placeholder(driverName, n) }
-
-	rows, err := db.QueryContext(ctx,
-		`SELECT id, session_id, content, content_source, created_at
-		 FROM experiential_logs
-		 WHERE session_id = `+ph(1)+`
-		 ORDER BY created_at ASC
-		 LIMIT `+ph(2),
-		sessionID, limit,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("tier2: querying logs for session %s: %w", sessionID, err)
-	}
-	defer rows.Close()
-
-	var out []pkg.ExperientialLog
-	for rows.Next() {
-		var e pkg.ExperientialLog
-		var createdAt time.Time
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &e.ContentSource, &createdAt); err != nil {
-			return nil, fmt.Errorf("tier2: scanning log row: %w", err)
-		}
-		e.CreatedAt = createdAt
-		out = append(out, e)
-	}
-	return out, rows.Err()
+	return store.QueryLogs(ctx, sessionID, limit)
 }

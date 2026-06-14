@@ -164,13 +164,9 @@ func HybridSearch(ctx context.Context, ftsHits, vectorHits []pkg.Hit, topK int) 
 // Staleness flagging
 // ---------------------------------------------------------------------------
 
-// BeliefRecord is a minimal struct for the staleness-flagging pass.
-// Only the fields needed by FlagStaleBeliefs are included.
-type BeliefRecord struct {
-	ID         string
-	Belief     *pkg.BeliefMeta
-	TableName  string
-}
+// BeliefRecord is an alias kept for backward compatibility within this package.
+// The canonical type is pkg.BeliefRecord.
+type BeliefRecord = pkg.BeliefRecord
 
 // FlagStaleBeliefs runs the end-of-session staleness pass over T3/T4/T5 records.
 // For each record, it computes Confidence(now) and flags as 'stale' if below
@@ -181,7 +177,7 @@ type BeliefRecord struct {
 // Only verification_state is updated (time-based staleness is a mechanical fact).
 func FlagStaleBeliefs(
 	ctx context.Context,
-	records []BeliefRecord,
+	records []pkg.BeliefRecord,
 	now time.Time,
 	decayRate, inferenceDecayBase, staleThreshold float64,
 	updateFn func(ctx context.Context, table, id, state string) error,
