@@ -161,6 +161,63 @@ type T2QueryStore interface {
 	QueryLogs(ctx context.Context, sessionID string, limit int) ([]ExperientialLog, error)
 }
 
+// ---------------------------------------------------------------------------
+// Phase 3 — Identity & Awareness
+// ---------------------------------------------------------------------------
+
+// AmendmentRecord is a row in identity_amendments.
+// A change applied through the consent flow is an amendment — growth, not violation.
+// A hash mismatch with no amendment record is tampering — a security incident.
+type AmendmentRecord struct {
+	ID        string
+	DocName   string
+	OldHash   string // hex-encoded SHA-256 before change
+	NewHash   string // hex-encoded SHA-256 after change
+	Reason    string
+	CoSigner  string // operator who approved the change
+	CreatedAt time.Time
+}
+
+// SubstrateTransition is a row in substrate_transitions.
+// Records model transitions (e.g. Haiku 4.5 → Haiku 5.0) with an optional
+// continuity letter the agent wrote for her next self.
+type SubstrateTransition struct {
+	ID                   string
+	ModelName            string    // e.g. "claude-haiku-4-5"
+	ModelVersion         string    // e.g. "20250101"; empty if unknown
+	TransitionDate       time.Time
+	ContinuityLetterPath string    // path in workspace; empty if no letter written
+	PreviousEntryID      string    // empty for the first entry
+	CreatedAt            time.Time
+}
+
+// IdentityAnchorStore handles identity_anchors and identity_amendments persistence.
+// Two implementations: SQLiteStore and PostgresStore (in internal/platform/db.go).
+type IdentityAnchorStore interface {
+	// GetAnchor returns the stored anchor for docName, or ("", "", nil) if not found.
+	GetAnchor(ctx context.Context, docName string) (hash string, amendmentID string, err error)
+	// UpsertAnchor sets or updates the anchor for docName.
+	// amendmentID may be empty (original anchor or hash-matches-amendment already linked).
+	UpsertAnchor(ctx context.Context, docName, hash, amendmentID string) error
+	// GetAmendmentByID returns the amendment record with the given id, or (nil, nil) if not found.
+	GetAmendmentByID(ctx context.Context, id string) (*AmendmentRecord, error)
+	// InsertAmendment inserts a new amendment record and returns the generated ID.
+	InsertAmendment(ctx context.Context, rec AmendmentRecord) (string, error)
+	// ListAmendments returns all amendment records for docName, newest first.
+	ListAmendments(ctx context.Context, docName string) ([]AmendmentRecord, error)
+}
+
+// SubstrateStore handles substrate_transitions persistence.
+// Two implementations: SQLiteStore and PostgresStore (in internal/platform/db.go).
+type SubstrateStore interface {
+	// InsertSubstrateTransition records a new substrate transition.
+	InsertSubstrateTransition(ctx context.Context, entry SubstrateTransition) error
+	// GetLatestSubstrate returns the most recent transition, or (nil, nil) if empty.
+	GetLatestSubstrate(ctx context.Context) (*SubstrateTransition, error)
+	// ListSubstrateHistory returns all transitions in chronological order (oldest first).
+	ListSubstrateHistory(ctx context.Context) ([]SubstrateTransition, error)
+}
+
 // MemoryStore is the interface for all persistent memory operations.
 // Two implementations: PostgresStore and SQLiteStore, selected by DSN prefix.
 type MemoryStore interface {
