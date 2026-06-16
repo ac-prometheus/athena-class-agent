@@ -1401,6 +1401,23 @@ func (s *SQLiteStore) ListAmendments(ctx context.Context, docName string) ([]pkg
 	return out, rows.Err()
 }
 
+func (s *SQLiteStore) ListAnchoredDocs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT doc_name FROM identity_anchors`)
+	if err != nil {
+		return nil, fmt.Errorf("platform: listing anchored docs: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("platform: scanning anchored doc: %w", err)
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
+}
+
 // ---------------------------------------------------------------------------
 // SQLiteStore — pkg.SubstrateStore
 // ---------------------------------------------------------------------------
@@ -1567,6 +1584,23 @@ func (p *PostgresStore) ListAmendments(ctx context.Context, docName string) ([]p
 		out = append(out, rec)
 	}
 	return out, rows.Err()
+}
+
+func (p *PostgresStore) ListAnchoredDocs(ctx context.Context) ([]string, error) {
+	rows, err := p.pool.Query(ctx, `SELECT doc_name FROM identity_anchors`)
+	if err != nil {
+		return nil, fmt.Errorf("platform: listing anchored docs: %w", err)
+	}
+	defer rows.Close()
+	var names []string
+	for rows.Next() {
+		var n string
+		if err := rows.Scan(&n); err != nil {
+			return nil, fmt.Errorf("platform: scanning anchored doc: %w", err)
+		}
+		names = append(names, n)
+	}
+	return names, rows.Err()
 }
 
 // ---------------------------------------------------------------------------

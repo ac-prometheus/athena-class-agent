@@ -205,6 +205,8 @@ type IdentityAnchorStore interface {
 	InsertAmendment(ctx context.Context, rec AmendmentRecord) (string, error)
 	// ListAmendments returns all amendment records for docName, newest first.
 	ListAmendments(ctx context.Context, docName string) ([]AmendmentRecord, error)
+	// ListAnchoredDocs returns the names of all documents that have stored anchors.
+	ListAnchoredDocs(ctx context.Context) ([]string, error)
 }
 
 // SubstrateStore handles substrate_transitions persistence.

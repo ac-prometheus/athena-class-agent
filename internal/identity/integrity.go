@@ -105,6 +105,22 @@ func VerifyAnchors(ctx context.Context, store pkg.IdentityAnchorStore, currentHa
 		report.Files = append(report.Files, fr)
 	}
 
+	// Check for deleted documents: anchors in DB with no file on disk.
+	// Once an anchor exists, the document is no longer optional — absence IS tampering.
+	storedDocs, err := store.ListAnchoredDocs(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("identity: listing anchored docs: %w", err)
+	}
+	for _, docName := range storedDocs {
+		if _, exists := currentHashes[docName]; !exists {
+			report.Files = append(report.Files, FileReport{
+				DocName: docName,
+				Status:  AnchorTampering,
+			})
+			report.HasTampering = true
+		}
+	}
+
 	return report, nil
 }
 
