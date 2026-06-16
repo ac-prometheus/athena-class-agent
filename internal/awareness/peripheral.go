@@ -1,0 +1,140 @@
+package awareness
+
+import (
+	"fmt"
+	"math"
+	"math/rand/v2"
+)
+
+// PeripheralAwareness tracks semantic drift across turns via an EWMA centroid.
+// When the conversation drifts far from its centroid (high velocity), a nudge
+// is injected suggesting a targeted memory search — the agent can then decide
+// whether to follow it.
+//
+// Design constraints:
+//   - At most 4 nudges per session (nudgeCount cap)
+//   - At least 8 turns between nudges (lastNudgeTurn cooldown)
+//   - Velocity threshold has ±jitter to avoid mechanistic triggering
+type PeripheralAwareness struct {
+	centroid          []float32
+	centroidN         int
+	lambda            float64 // EWMA decay: default 0.85
+	nudgeCount        int
+	lastNudgeTurn     int
+	velocityThreshold float64
+	jitter            float64 // default 0.03
+}
+
+// NudgeInjection is the output when a velocity spike warrants a memory hint.
+type NudgeInjection struct {
+	Turn     int
+	Velocity float64
+	Command  string // CLI-command suggestion surfaced to the agent
+	Topic    string
+}
+
+// NewPeripheralAwareness creates a PeripheralAwareness with the given threshold.
+// threshold should come from config (PA_VELOCITY_THRESHOLD, default 0.28).
+func NewPeripheralAwareness(threshold float64) *PeripheralAwareness {
+	return &PeripheralAwareness{
+		lambda:            0.85,
+		velocityThreshold: threshold,
+		jitter:            0.03,
+		lastNudgeTurn:     -8, // allow first nudge on turn 0 if velocity is high
+	}
+}
+
+// UpdateCentroid incorporates turnEmbedding into the running EWMA centroid.
+// Must be called after CheckNudge so velocity is computed against the pre-turn centroid.
+func (pa *PeripheralAwareness) UpdateCentroid(turnEmbedding []float32) {
+	if len(turnEmbedding) == 0 {
+		return
+	}
+	if pa.centroid == nil {
+		pa.centroid = make([]float32, len(turnEmbedding))
+		copy(pa.centroid, turnEmbedding)
+		pa.centroidN = 1
+		return
+	}
+	if len(pa.centroid) != len(turnEmbedding) {
+		return
+	}
+	// EWMA: centroid_new = λ * centroid_old + (1-λ) * turn
+	for i := range pa.centroid {
+		pa.centroid[i] = float32(pa.lambda*float64(pa.centroid[i]) +
+			(1-pa.lambda)*float64(turnEmbedding[i]))
+	}
+	pa.centroidN++
+}
+
+// SemanticVelocity returns the cosine distance between the current centroid
+// and the new embedding. Returns 0 if the centroid is not yet established.
+func (pa *PeripheralAwareness) SemanticVelocity(turnEmbedding []float32) float64 {
+	if pa.centroid == nil || len(pa.centroid) != len(turnEmbedding) {
+		return 0
+	}
+	return cosineDistance(pa.centroid, turnEmbedding)
+}
+
+// CheckNudge evaluates whether a nudge should fire this turn.
+// Returns nil if no nudge fires (caps, cooldown, or velocity below threshold).
+// Call UpdateCentroid after this to keep velocity computation accurate.
+func (pa *PeripheralAwareness) CheckNudge(turn int, turnEmbedding []float32, topics []string) *NudgeInjection {
+	if pa.nudgeCount >= 4 {
+		return nil
+	}
+	if turn-pa.lastNudgeTurn < 8 {
+		return nil
+	}
+
+	velocity := pa.SemanticVelocity(turnEmbedding)
+	// Apply jitter so the threshold isn't a hard cliff.
+	jitterDelta := (rand.Float64()*2 - 1) * pa.jitter
+	effectiveThreshold := pa.velocityThreshold + jitterDelta
+
+	if velocity <= effectiveThreshold {
+		return nil
+	}
+
+	topic := chooseTopic(topics)
+	nudge := &NudgeInjection{
+		Turn:     turn,
+		Velocity: velocity,
+		Topic:    topic,
+		Command:  fmt.Sprintf(`memory search "%s" | head -5`, topic),
+	}
+
+	pa.nudgeCount++
+	pa.lastNudgeTurn = turn
+	return nudge
+}
+
+// chooseTopic returns the first non-empty topic, or a generic fallback.
+func chooseTopic(topics []string) string {
+	for _, t := range topics {
+		if t != "" {
+			return t
+		}
+	}
+	return "current focus"
+}
+
+// cosineDistance returns 1 - cosine_similarity(a, b).
+// Result is in [0, 2]; 0 = identical direction, 2 = opposite.
+func cosineDistance(a, b []float32) float64 {
+	if len(a) != len(b) || len(a) == 0 {
+		return 0
+	}
+	var dot, normA, normB float64
+	for i := range a {
+		ai, bi := float64(a[i]), float64(b[i])
+		dot += ai * bi
+		normA += ai * ai
+		normB += bi * bi
+	}
+	if normA == 0 || normB == 0 {
+		return 0
+	}
+	similarity := dot / (math.Sqrt(normA) * math.Sqrt(normB))
+	return 1 - similarity
+}
