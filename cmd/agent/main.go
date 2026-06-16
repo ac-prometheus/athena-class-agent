@@ -54,7 +54,7 @@ func run() error {
 		RequestTimeout:     cfg.LLMRequestTimeout,
 	})
 
-	assembler := harness.NewContextAssembler(cfg.IdentityDir)
+	assembler := harness.NewContextAssembler(cfg.IdentityDir, cfg.TokenBudget)
 
 	runner := &phase1Runner{
 		cfg:       cfg,
@@ -78,10 +78,11 @@ type phase1Runner struct {
 }
 
 func (r *phase1Runner) RunSession(wakeReason string) error {
-	systemPrompt, err := r.assembler.AssembleSystemPrompt()
+	assembled, err := r.assembler.Assemble(context.Background(), harness.MinimalAssembleConfig())
 	if err != nil {
-		return fmt.Errorf("assembling system prompt: %w", err)
+		return fmt.Errorf("assembling context: %w", err)
 	}
+	systemPrompt := assembled.SystemPrompt
 
 	session := harness.NewSession(r.cfg.AgentName, wakeReason)
 	budget := harness.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)

@@ -55,6 +55,12 @@ type assembleConfig struct {
 	llmFn    func(string) (string, error) // for bridge synthesis
 }
 
+// MinimalAssembleConfig returns an assembleConfig with nil dependencies — suitable for
+// Phase 1/2 sessions where memory, embeddings, and bridge aren't yet wired.
+func MinimalAssembleConfig() assembleConfig {
+	return assembleConfig{}
+}
+
 // NewContextAssembler creates an assembler with the given identity directory and token budget.
 func NewContextAssembler(identityDir string, budget int) *ContextAssembler {
 	if budget <= 0 {
