@@ -1,7 +1,8 @@
 package harness
 
 import (
-	"fmt"
+	"crypto/rand"
+	"encoding/hex"
 	"log/slog"
 	"time"
 
@@ -21,7 +22,9 @@ type Session struct {
 // Phase 1 stub: no database persistence, no checkpoint scan, no identity loading.
 // Those land in Phase 2 (memory) and Phase 3 (identity).
 func NewSession(agentName, wakeReason string) *Session {
-	id := fmt.Sprintf("%s-%d", agentName, time.Now().UnixNano())
+	var buf [16]byte
+	_, _ = rand.Read(buf[:])
+	id := agentName + "-" + hex.EncodeToString(buf[:])
 	slog.Info("harness: new session", "session_id", id, "agent", agentName, "wake_reason", wakeReason)
 
 	return &Session{
