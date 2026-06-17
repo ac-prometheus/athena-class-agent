@@ -23,7 +23,9 @@ type Session struct {
 // Those land in Phase 2 (memory) and Phase 3 (identity).
 func NewSession(agentName, wakeReason string) *Session {
 	var buf [16]byte
-	_, _ = rand.Read(buf[:])
+	if _, err := rand.Read(buf[:]); err != nil {
+		panic("harness: crypto/rand unavailable: " + err.Error())
+	}
 	id := agentName + "-" + hex.EncodeToString(buf[:])
 	slog.Info("harness: new session", "session_id", id, "agent", agentName, "wake_reason", wakeReason)
 
