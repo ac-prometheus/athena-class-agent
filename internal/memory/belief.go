@@ -21,7 +21,7 @@ type DecayConfig struct {
 func DefaultDecayConfig() DecayConfig {
 	return DecayConfig{
 		DecayRate:          0.05,
-		InferenceDecayBase: 2.0,
+		InferenceDecayBase: 0.90,
 		StaleThreshold:     0.3,
 	}
 }

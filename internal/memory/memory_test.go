@@ -172,7 +172,7 @@ func TestConfidenceDecaysOverTime(t *testing.T) {
 //
 // The formula: effectiveRate = decayRate / pow(base, distance)
 //   - With base < 1: pow(base, distance) < 1 as distance rises → effectiveRate rises → faster decay.
-//   - The DefaultDecayConfig() uses base=2.0 (harness code) but the spec text says "0.90 per step".
+//   - DefaultDecayConfig() uses base=0.90 matching the spec.
 //   - We explicitly pass 0.90 here to test the spec's stated intent.
 func TestConfidenceHigherInferenceDecaysFaster(t *testing.T) {
 	anchor := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)

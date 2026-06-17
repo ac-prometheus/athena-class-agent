@@ -18,6 +18,24 @@ import (
 	_ "github.com/mattn/go-sqlite3"
 )
 
+// validTierTables is the allowlist of table names that may appear in
+// dynamic SQL (UpdateVerificationState, MarkNeedsReview, embed worker).
+// Prevents SQL injection via table name concatenation.
+var validTierTables = map[string]bool{
+	"narrative_summaries": true,
+	"reflections":         true,
+	"kg_entities":         true,
+	"kg_relationships":    true,
+	"experiential_logs":   true,
+}
+
+func validateTableName(table string) error {
+	if !validTierTables[table] {
+		return fmt.Errorf("platform: invalid table name %q — not in tier allowlist", table)
+	}
+	return nil
+}
+
 // Store wraps a *sql.DB with the DSN it was opened from.
 // Used by the migration runner and other platform-level code that needs
 // raw database access outside the MemoryStore interface.
@@ -914,6 +932,9 @@ func (s *SQLiteStore) LoadBeliefRecords(ctx context.Context) ([]pkg.BeliefRecord
 // UpdateVerificationState updates the verification_state JSON field in belief_meta.
 // T4 CONSENT BOUNDARY: base_confidence is never touched here.
 func (s *SQLiteStore) UpdateVerificationState(ctx context.Context, table, id, state string) error {
+	if err := validateTableName(table); err != nil {
+		return err
+	}
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE `+table+` SET belief_meta = json_set(belief_meta, '$.verification_state', ?) WHERE id = ?`,
 		state, id,
@@ -1188,6 +1209,9 @@ func (p *PostgresStore) LoadBeliefRecords(ctx context.Context) ([]pkg.BeliefReco
 // UpdateVerificationState updates the verification_state JSON field in belief_meta.
 // T4 CONSENT BOUNDARY: base_confidence is never touched here.
 func (p *PostgresStore) UpdateVerificationState(ctx context.Context, table, id, state string) error {
+	if err := validateTableName(table); err != nil {
+		return err
+	}
 	_, err := p.pool.Exec(ctx,
 		`UPDATE `+table+` SET belief_meta = jsonb_set(belief_meta, '{verification_state}', to_jsonb($1::text)) WHERE id = $2`,
 		state, id,

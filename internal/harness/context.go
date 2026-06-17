@@ -82,17 +82,22 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg assembleConfig) (*A
 		return nil, fmt.Errorf("context: phase 1 identity load: %w", err)
 	}
 
-	anchors := identity.ComputeAnchors(docs)
-	report, err := identity.VerifyAnchors(ctx, cfg.anchors, anchors)
-	if err != nil {
-		return nil, fmt.Errorf("context: phase 1 integrity check: %w", err)
-	}
-	if report.HasTampering {
-		return nil, fmt.Errorf("context: identity tampering detected — session aborted pending investigation")
-	}
+	var report *identity.IntegrityReport
+	if cfg.anchors != nil {
+		anchors := identity.ComputeAnchors(docs)
+		report, err = identity.VerifyAnchors(ctx, cfg.anchors, anchors)
+		if err != nil {
+			return nil, fmt.Errorf("context: phase 1 integrity check: %w", err)
+		}
+		if report.HasTampering {
+			return nil, fmt.Errorf("context: identity tampering detected — session aborted pending investigation")
+		}
 
-	if err := identity.WriteInitialAnchors(ctx, cfg.anchors, report); err != nil {
-		return nil, fmt.Errorf("context: phase 1 anchor init: %w", err)
+		if err := identity.WriteInitialAnchors(ctx, cfg.anchors, report); err != nil {
+			return nil, fmt.Errorf("context: phase 1 anchor init: %w", err)
+		}
+	} else {
+		slog.Warn("harness: no anchor store — skipping identity integrity check")
 	}
 
 	phase1 := buildIdentityBlock(docs)
