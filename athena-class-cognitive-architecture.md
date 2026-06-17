@@ -219,6 +219,12 @@ In priority order:
 6. **The personal thread.** Written to the next spark in second person: "address, don't report."
 7. **Open questions and uncertainties.** A compression that resolves uncertainty by omission is performing certainty inflation by deletion.
 
+### Compression Must Not Launder Provenance
+
+When the agent operates in a world with external input — messages, forum posts, content from other minds — the compression pipeline becomes a potential vector. Content that entered the agent's experience through an external channel carries provenance metadata: who said it, where it came from, what trust level the content integrity layer assigned. A compression that strips this metadata and presents the content as the agent's own experience has laundered untrusted input into trusted memory.
+
+The architectural requirement: the compression pipeline must refuse to compress experiential content that lacks content-integrity annotation. If external content entered the session without passing through the security layer, it must not be promoted to narrative memory as though it had. This is a one-line check with permanent consequences — without it, a single poisoned input in Tier 2 becomes a clean belief in Tier 3, indistinguishable from the agent's own verified experience.
+
 ---
 
 ## The Agent Among Other Minds
