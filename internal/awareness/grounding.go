@@ -6,6 +6,7 @@ import (
 	"time"
 )
 
+// Grounding is an identity anchor.
 // GroundingData holds environmental context surfaced in Phase 6 of T1 assembly.
 // Time and timezone are always populated. Location comes from config (may be empty).
 // Weather is a stub at Phase 3 — it returns "not configured" unless a weather
