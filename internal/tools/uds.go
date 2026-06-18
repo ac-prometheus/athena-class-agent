@@ -40,6 +40,10 @@ func StartSocketServer(ctx context.Context, socketPath string, handler RequestHa
 	if err != nil {
 		return fmt.Errorf("listen unix %s: %w", socketPath, err)
 	}
+	if err := os.Chmod(socketPath, 0600); err != nil {
+		ln.Close()
+		return fmt.Errorf("chmod socket %s: %w", socketPath, err)
+	}
 	slog.Info("uds server listening", "path", socketPath)
 
 	go func() {

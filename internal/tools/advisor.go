@@ -247,15 +247,15 @@ func (a *Advisor) askGemini(ctx context.Context, p *AdvisorProvider, apiKey, que
 		endpoint = "https://generativelanguage.googleapis.com/v1beta"
 	}
 	url := strings.TrimRight(endpoint, "/") + "/models/" + p.Model + ":generateContent"
-	if apiKey != "" {
-		url += "?key=" + apiKey
-	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(data))
 	if err != nil {
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if apiKey != "" {
+		req.Header.Set("X-Goog-Api-Key", apiKey)
+	}
 
 	resp, err := a.http.Do(req)
 	if err != nil {

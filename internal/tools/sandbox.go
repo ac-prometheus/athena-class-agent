@@ -6,7 +6,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"os/user"
 	"strconv"
@@ -26,10 +25,11 @@ const (
 
 // SandboxConfig is the configuration for a Sandbox instance.
 type SandboxConfig struct {
-	Mode         SandboxMode
-	AllowedPaths []string
-	BlockedCmds  []string
-	User         string // unix username for user mode
+	Mode          SandboxMode
+	AllowedPaths  []string
+	BlockedCmds   []string
+	User          string // unix username for user mode
+	ContainerName string // read once at startup for container mode
 }
 
 // Sandbox executes shell commands subject to the configured policy.
@@ -49,40 +49,43 @@ func (s *Sandbox) Execute(ctx context.Context, command string) (string, error) {
 		return "", err
 	}
 	switch s.cfg.Mode {
-	case SandboxModeContainer:
-		return s.execInContainer(ctx, command)
-	case SandboxModeUser:
-		return s.execAsUser(ctx, command)
+	case SandboxModeNone:
+		return s.execDirect(ctx, command)
 	case SandboxModePermissive:
 		return s.execPermissive(ctx, command)
+	case SandboxModeUser:
+		return s.execAsUser(ctx, command)
+	case SandboxModeContainer:
+		return s.execInContainer(ctx, command)
 	default:
-		return s.execDirect(ctx, command)
+		return "", fmt.Errorf("sandbox: unrecognized mode %q — refusing to execute", s.cfg.Mode)
 	}
 }
 
-// checkBlocklist rejects commands whose first token matches any blocked command.
+// checkBlocklist scans all tokens in the command against the blocked list.
+// Advisory only — the real security boundary is the sandbox mode. But scanning
+// all tokens prevents the trivial bypass of wrapping a blocked command in sh -c.
 func (s *Sandbox) checkBlocklist(command string) error {
 	if len(s.cfg.BlockedCmds) == 0 {
 		return nil
 	}
 	fields := strings.Fields(command)
-	if len(fields) == 0 {
-		return nil
-	}
-	first := fields[0]
-	// Strip path prefix for comparison.
-	if idx := strings.LastIndex(first, "/"); idx >= 0 {
-		first = first[idx+1:]
-	}
-	for _, blocked := range s.cfg.BlockedCmds {
-		if first == blocked {
-			return fmt.Errorf("sandbox: command %q is blocked by policy (blocked command: %s)", first, blocked)
+	for _, token := range fields {
+		// Strip path prefix for comparison.
+		bare := token
+		if idx := strings.LastIndex(bare, "/"); idx >= 0 {
+			bare = bare[idx+1:]
+		}
+		for _, blocked := range s.cfg.BlockedCmds {
+			if bare == blocked {
+				return fmt.Errorf("sandbox: %q matches blocked command %q — rejected (advisory blocklist; real boundary is sandbox mode %q)", token, blocked, s.cfg.Mode)
+			}
 		}
 	}
 	return nil
 }
 
-func truncate(s string, n int) string {
+func truncateSandbox(s string, n int) string {
 	if len(s) <= n {
 		return s
 	}
@@ -90,7 +93,7 @@ func truncate(s string, n int) string {
 }
 
 func (s *Sandbox) execDirect(ctx context.Context, command string) (string, error) {
-	slog.Debug("sandbox exec", "mode", "none", "cmd", truncate(command, 80))
+	slog.Debug("sandbox exec", "mode", "none", "cmd", truncateSandbox(command, 80))
 	out, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("exec: %w", err)
@@ -99,11 +102,10 @@ func (s *Sandbox) execDirect(ctx context.Context, command string) (string, error
 }
 
 func (s *Sandbox) execPermissive(ctx context.Context, command string) (string, error) {
-	// Path allowlist validation is a stub — AllowedPaths enforcement planned for a future pass.
 	if len(s.cfg.AllowedPaths) > 0 {
-		slog.Warn("sandbox: permissive mode AllowedPaths enforcement not yet implemented; executing anyway")
+		return "", fmt.Errorf("sandbox: permissive mode AllowedPaths enforcement not yet implemented — refusing to execute (fail closed)")
 	}
-	slog.Debug("sandbox exec", "mode", "permissive", "cmd", truncate(command, 80))
+	slog.Debug("sandbox exec", "mode", "permissive", "cmd", truncateSandbox(command, 80))
 	out, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("exec: %w", err)
@@ -112,7 +114,7 @@ func (s *Sandbox) execPermissive(ctx context.Context, command string) (string, e
 }
 
 func (s *Sandbox) execAsUser(ctx context.Context, command string) (string, error) {
-	slog.Debug("sandbox exec", "mode", "user", "user", s.cfg.User, "cmd", truncate(command, 80))
+	slog.Debug("sandbox exec", "mode", "user", "user", s.cfg.User, "cmd", truncateSandbox(command, 80))
 	u, err := user.Lookup(s.cfg.User)
 	if err != nil {
 		return "", fmt.Errorf("sandbox: lookup user %q: %w", s.cfg.User, err)
@@ -140,12 +142,11 @@ func (s *Sandbox) execAsUser(ctx context.Context, command string) (string, error
 }
 
 func (s *Sandbox) execInContainer(ctx context.Context, command string) (string, error) {
-	slog.Debug("sandbox exec", "mode", "container", "cmd", truncate(command, 80))
-	containerName := os.Getenv("SANDBOX_CONTAINER_NAME")
-	if containerName == "" {
-		return "", fmt.Errorf("sandbox: SANDBOX_CONTAINER_NAME not set for container mode")
+	slog.Debug("sandbox exec", "mode", "container", "cmd", truncateSandbox(command, 80))
+	if s.cfg.ContainerName == "" {
+		return "", fmt.Errorf("sandbox: container mode requires ContainerName in config")
 	}
-	cmd := exec.CommandContext(ctx, "docker", "exec", containerName, "sh", "-c", command)
+	cmd := exec.CommandContext(ctx, "docker", "exec", s.cfg.ContainerName, "sh", "-c", command)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return string(out), fmt.Errorf("docker exec: %w", err)
