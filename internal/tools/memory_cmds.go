@@ -66,21 +66,31 @@ func (h *MemorySearchHandler) Execute(ctx context.Context, args map[string]any) 
 	return strings.TrimSpace(sb.String()), nil
 }
 
-// MemoryRecallHandler retrieves T2 experiential logs by session ID.
+// MemoryRecallHandler retrieves T2 experiential logs for the current session.
+// Cross-session recall requires explicit "cross_session": true — the agent must
+// know it's reading outside its own experiential record.
 type MemoryRecallHandler struct {
-	store pkg.T2QueryStore
+	store            pkg.T2QueryStore
+	CurrentSessionID string
 }
 
 // Name implements pkg.ToolHandler.
 func (h *MemoryRecallHandler) Name() string { return "memory_recall" }
 
 // Execute retrieves raw T2 logs for a session.
-// args["session_id"] — the session to retrieve (required)
-// args["limit"]      — max entries to return (default 50)
+// args["session_id"]    — defaults to current session if omitted
+// args["cross_session"] — must be true to read a different session's logs
+// args["limit"]         — max entries to return (default 50)
 func (h *MemoryRecallHandler) Execute(ctx context.Context, args map[string]any) (string, error) {
-	sessionID, ok := stringArg(args, "session_id")
-	if !ok || sessionID == "" {
-		return "", fmt.Errorf("memory_recall: missing required arg 'session_id'")
+	sessionID, _ := stringArg(args, "session_id")
+	if sessionID == "" {
+		sessionID = h.CurrentSessionID
+	}
+	if sessionID != h.CurrentSessionID {
+		crossSession, _ := args["cross_session"].(bool)
+		if !crossSession {
+			return "", fmt.Errorf("memory_recall: reading session %q requires cross_session=true (current session is %q)", sessionID, h.CurrentSessionID)
+		}
 	}
 	limit := intArg(args, "limit", 50)
 
