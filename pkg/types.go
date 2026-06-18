@@ -46,11 +46,20 @@ type ToolDef struct {
 	Parameters  map[string]any
 }
 
+// ToolCall is a single tool invocation requested by the model.
+// Arguments is the raw JSON string — callers unmarshal to map[string]any.
+type ToolCall struct {
+	ID        string // model-assigned call ID (e.g. "call_abc123")
+	Name      string
+	Arguments string // raw JSON
+}
+
 // CompletionResponse is the output of an LLM completion call.
 // Confidence is always computed at read time — never stored and re-applied.
 type CompletionResponse struct {
 	Content          string
 	ThinkingTrace    string        // stripped from content, preserved here
+	ToolCalls        []ToolCall    // non-nil when the model requested tool invocations
 	PromptTokens     int
 	CompletionTokens int
 	ThinkingTokens   int           // estimated for local models, exact for Anthropic

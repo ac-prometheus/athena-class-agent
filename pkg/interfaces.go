@@ -244,3 +244,30 @@ type MemoryStore interface {
 
 	Close() error
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Tools & CLI
+// ---------------------------------------------------------------------------
+
+// ToolHandler is the contract every tool implementation must satisfy.
+// Name returns the canonical snake_case tool name as registered.
+// Execute receives parsed args and returns a human-readable result string.
+type ToolHandler interface {
+	Name() string
+	Execute(ctx context.Context, args map[string]any) (string, error)
+}
+
+// ToolGroup is a logical grouping of tools sharing a tier and keyword set.
+type ToolGroup struct {
+	Name     string
+	Tier     int
+	Keywords []string
+	Tools    []ToolDef
+}
+
+// ToolRegistry manages the set of available tools for a session.
+type ToolRegistry interface {
+	Register(h ToolHandler)
+	Get(name string) (ToolHandler, bool)
+	List() []ToolGroup
+}

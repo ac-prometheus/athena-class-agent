@@ -59,7 +59,12 @@ type Config struct {
 	TelemetryEnabled bool
 
 	// Sandbox
-	SandboxMode string // "container", "user", "permissive", "none"
+	SandboxMode         string // "container", "user", "permissive", "none"
+	SandboxAllowedPaths string
+	SandboxBlockedCmds  string
+	SandboxUser         string
+	RuntimeDir          string
+	AdvisorConfigPath   string
 
 	// LLM request timeout. Applied to the HTTP client used by all LLM callers.
 	// Default 10 minutes; read from LLM_REQUEST_TIMEOUT (e.g. "10m", "600s").
@@ -100,6 +105,11 @@ func Load() (*Config, error) {
 		StaleThreshold:      envFloat("STALE_THRESHOLD", 0.20),
 		TelemetryEnabled:    envBool("TELEMETRY_ENABLED", true),
 		SandboxMode:         envStr("SANDBOX_MODE", "user"),
+		SandboxAllowedPaths: envStr("SANDBOX_ALLOWED_PATHS", ""),
+		SandboxBlockedCmds:  envStr("SANDBOX_BLOCKED_CMDS", ""),
+		SandboxUser:         envStr("SANDBOX_USER", ""),
+		RuntimeDir:          envStr("RUNTIME_DIR", "./run"),
+		AdvisorConfigPath:   envStr("ADVISOR_CONFIG", ""),
 		LLMRequestTimeout:   envDuration("LLM_REQUEST_TIMEOUT", 10*time.Minute),
 		SkipWitnessCheck:    envBool("SKIP_WITNESS_CHECK", false),
 	}
