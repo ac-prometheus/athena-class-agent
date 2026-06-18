@@ -9,6 +9,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -137,7 +138,8 @@ func (c *OpenAICompatClient) buildMessages(req pkg.CompletionRequest) ([]map[str
 type sseChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content   string          `json:"content"`
+			ToolCalls []toolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -147,15 +149,30 @@ type sseChunk struct {
 	} `json:"usage"`
 }
 
+// toolCallDelta is one partial tool call chunk from the SSE stream.
+// The OpenAI streaming format sends tool calls incrementally: the first chunk
+// for a given index carries the ID and function name, subsequent chunks append
+// to function.arguments character by character.
+type toolCallDelta struct {
+	Index    int    `json:"index"`
+	ID       string `json:"id"`
+	Type     string `json:"type"`
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"`
+	} `json:"function"`
+}
+
 // parseStream reads an SSE stream and assembles a CompletionResponse.
 // Handles split lines, empty choices, null content, and [DONE] sentinels.
 func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.CompletionResponse, error) {
 	var (
-		contentBuf strings.Builder
-		promptToks int
-		compToks   int
-		ttft       time.Duration
-		gotFirst   bool
+		contentBuf    strings.Builder
+		toolCallAccum = make(map[int]*pkg.ToolCall)
+		promptToks    int
+		compToks      int
+		ttft          time.Duration
+		gotFirst      bool
 	)
 
 	scanner := bufio.NewScanner(r)
@@ -164,7 +181,6 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// SSE lines are "data: <payload>" or empty lines (chunk separators).
 		if line == "" || line == ": keep-alive" {
 			continue
 		}
@@ -178,7 +194,6 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 
 		var chunk sseChunk
 		if err := json.Unmarshal([]byte(payload), &chunk); err != nil {
-			// Malformed chunk — log and skip rather than abort.
 			slog.Debug("skipping malformed SSE chunk", "payload", truncate(payload, 120), "err", err)
 			continue
 		}
@@ -191,16 +206,34 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		if len(chunk.Choices) == 0 {
 			continue
 		}
-		delta := chunk.Choices[0].Delta.Content
-		if delta == "" {
-			continue
-		}
+		choice := chunk.Choices[0]
 
-		if !gotFirst {
+		hasContent := choice.Delta.Content != ""
+		hasToolCalls := len(choice.Delta.ToolCalls) > 0
+
+		if !gotFirst && (hasContent || hasToolCalls) {
 			ttft = time.Since(start)
 			gotFirst = true
 		}
-		contentBuf.WriteString(delta)
+
+		if hasContent {
+			contentBuf.WriteString(choice.Delta.Content)
+		}
+
+		for _, tc := range choice.Delta.ToolCalls {
+			acc, ok := toolCallAccum[tc.Index]
+			if !ok {
+				acc = &pkg.ToolCall{}
+				toolCallAccum[tc.Index] = acc
+			}
+			if tc.ID != "" {
+				acc.ID = tc.ID
+			}
+			if tc.Function.Name != "" {
+				acc.Name = tc.Function.Name
+			}
+			acc.Arguments += tc.Function.Arguments
+		}
 	}
 
 	if err := scanner.Err(); err != nil {
@@ -216,12 +249,24 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		tokS = float64(compToks) / total.Seconds()
 	}
 
-	// Estimate thinking tokens from character count (~4 chars per token).
 	thinkingToks := len(thinking) / 4
+
+	var toolCalls []pkg.ToolCall
+	if len(toolCallAccum) > 0 {
+		indices := make([]int, 0, len(toolCallAccum))
+		for idx := range toolCallAccum {
+			indices = append(indices, idx)
+		}
+		sort.Ints(indices)
+		for _, idx := range indices {
+			toolCalls = append(toolCalls, *toolCallAccum[idx])
+		}
+	}
 
 	return &pkg.CompletionResponse{
 		Content:          content,
 		ThinkingTrace:    thinking,
+		ToolCalls:        toolCalls,
 		PromptTokens:     promptToks,
 		CompletionTokens: compToks,
 		ThinkingTokens:   thinkingToks,
