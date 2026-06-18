@@ -88,7 +88,7 @@ func (r *phase1Runner) RunSession(wakeReason string) error {
 	budget := harness.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)
 	hooks := engine.NewHookPipeline()
 
-	loop := engine.NewLoop(r.client, engine.LoopConfig{
+	loop := engine.NewLoop(r.client, nil, hooks, engine.LoopConfig{
 		MaxTurns:    1,
 		TokenBudget: r.cfg.TokenBudget,
 	})
