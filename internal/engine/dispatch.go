@@ -12,8 +12,12 @@ import (
 // DispatchToolCall unmarshals the tool call arguments, looks up the handler, and
 // executes it. If dryRun is true the call is logged but not executed.
 func DispatchToolCall(ctx context.Context, registry pkg.ToolRegistry, call pkg.ToolCall, dryRun bool) (string, error) {
+	const maxArgsSize = 1 << 20 // 1 MB
 	var args map[string]any
 	if call.Arguments != "" {
+		if len(call.Arguments) > maxArgsSize {
+			return "", fmt.Errorf("dispatch: arguments for %q exceed %d bytes — rejecting", call.Name, maxArgsSize)
+		}
 		if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
 			return "", fmt.Errorf("dispatch: unmarshal args for %q: %w", call.Name, err)
 		}
