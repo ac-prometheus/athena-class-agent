@@ -24,10 +24,16 @@ type ToolCallResult struct {
 }
 
 // LoopConfig configures the agentic loop.
+//
+// DryRun suppresses tool execution (handlers are not called) but hooks still
+// run — this allows testing the hook pipeline (T2 logging, budget monitoring,
+// peripheral awareness) without real tool side effects. For full side-effect
+// suppression (no hooks, no tool calls), use Rehearsal mode, which returns
+// before the loop starts.
 type LoopConfig struct {
 	MaxTurns    int  // default 50 if zero
 	TokenBudget int
-	DryRun      bool // log tool calls but don't execute
+	DryRun      bool // log tool calls but don't execute; hooks still run
 	Rehearsal   bool // run orientation only, no agent loop
 }
 

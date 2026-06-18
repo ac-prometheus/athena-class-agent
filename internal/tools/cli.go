@@ -13,18 +13,34 @@ import (
 // It routes method names to sandbox execution, advisor queries, tool registry lookups,
 // or the built-in "discover" verb.
 type CLIDispatcher struct {
-	registry pkg.ToolRegistry
-	sandbox  *Sandbox
-	advisor  *Advisor
+	registry  pkg.ToolRegistry
+	sandbox   *Sandbox
+	advisor   *Advisor
+	activeTiers map[string]bool // tool names active this session; nil = no gating
 }
 
 // NewCLIDispatcher creates a CLIDispatcher wired to the given registry, sandbox, and advisor.
 func NewCLIDispatcher(registry pkg.ToolRegistry, sandbox *Sandbox, advisor *Advisor) *CLIDispatcher {
 	return &CLIDispatcher{
-		registry: registry,
-		sandbox:  sandbox,
-		advisor:  advisor,
+		registry:    registry,
+		sandbox:     sandbox,
+		advisor:     advisor,
+		activeTiers: nil,
 	}
+}
+
+// SetActiveTiers restricts handleRegistry to only tools in the given set.
+// Pass nil to disable gating (all registered tools accessible).
+func (d *CLIDispatcher) SetActiveTiers(toolNames []string) {
+	if toolNames == nil {
+		d.activeTiers = nil
+		return
+	}
+	m := make(map[string]bool, len(toolNames))
+	for _, n := range toolNames {
+		m[n] = true
+	}
+	d.activeTiers = m
 }
 
 // Handle routes a SocketRequest to the appropriate handler and returns a SocketResponse.
@@ -111,6 +127,9 @@ func (d *CLIDispatcher) handleDiscover(args map[string]any) SocketResponse {
 }
 
 func (d *CLIDispatcher) handleRegistry(ctx context.Context, method string, args map[string]any) SocketResponse {
+	if d.activeTiers != nil && !d.activeTiers[method] {
+		return SocketResponse{Error: fmt.Sprintf("command %q not available in current session tier", method)}
+	}
 	handler, ok := d.registry.Get(method)
 	if !ok {
 		return SocketResponse{Error: fmt.Sprintf("unknown command: %s", method)}
