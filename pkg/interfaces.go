@@ -271,3 +271,44 @@ type ToolRegistry interface {
 	Get(name string) (ToolHandler, bool)
 	List() []ToolGroup
 }
+
+// ---------------------------------------------------------------------------
+// Phase 5 — Channels & Aegis
+// ---------------------------------------------------------------------------
+
+// AegisAnnotation is the trust report attached to content after Aegis processing.
+type AegisAnnotation struct {
+	TrustScore    float64  // 0.0–1.0, skeptical prior 0.40 for new sources
+	Source        string   // domain or channel identifier
+	ContentSource string   // "discord", "forum-content", "browser-content", etc.
+	Flags         []string // injection pattern matches (informational, never blocking)
+	Sanitized     bool     // true if normalization modified the content
+	ScanPassed    bool     // true if no injection patterns detected
+	AnnotatedAt   time.Time
+}
+
+// AnnotatedContent is the output of the Aegis gateway.
+type AnnotatedContent struct {
+	Original   []byte // raw bytes as received from channel
+	Normalized string // after NFKC + invisible char stripping
+	Annotation AegisAnnotation
+}
+
+// OutboundReport is the result of outbound leak scanning.
+type OutboundReport struct {
+	Clean    bool
+	Findings []string // descriptions of detected leaks (API keys, paths, etc.)
+}
+
+// TrustStore persists trust scores across sessions.
+type TrustStore interface {
+	GetTrust(ctx context.Context, source string) (score float64, interactions int, err error)
+	UpdateTrust(ctx context.Context, source string, score float64) error
+	IncrementInteractions(ctx context.Context, source string) error
+}
+
+// ContentGateway is the Aegis pipeline interface.
+type ContentGateway interface {
+	ProcessInbound(ctx context.Context, raw []byte, source, contentSource string) (*AnnotatedContent, error)
+	ReviewOutbound(ctx context.Context, content string) (*OutboundReport, error)
+}
