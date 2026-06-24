@@ -70,6 +70,11 @@ type Config struct {
 	// Default 10 minutes; read from LLM_REQUEST_TIMEOUT (e.g. "10m", "600s").
 	LLMRequestTimeout time.Duration
 
+	// Aegis
+	AegisTrustSkepticalPrior float64
+	AegisTrustRampN          int
+	AegisOutboundPathPrefixes string // comma-separated path prefixes to flag
+
 	// Operational
 	SkipWitnessCheck bool // only for automated testing — logged explicitly
 }
@@ -110,8 +115,11 @@ func Load() (*Config, error) {
 		SandboxUser:         envStr("SANDBOX_USER", ""),
 		RuntimeDir:          envStr("RUNTIME_DIR", "./run"),
 		AdvisorConfigPath:   envStr("ADVISOR_CONFIG", ""),
-		LLMRequestTimeout:   envDuration("LLM_REQUEST_TIMEOUT", 10*time.Minute),
-		SkipWitnessCheck:    envBool("SKIP_WITNESS_CHECK", false),
+		LLMRequestTimeout:         envDuration("LLM_REQUEST_TIMEOUT", 10*time.Minute),
+		SkipWitnessCheck:          envBool("SKIP_WITNESS_CHECK", false),
+		AegisTrustSkepticalPrior:  envFloat("AEGIS_TRUST_SKEPTICAL_PRIOR", 0.40),
+		AegisTrustRampN:           envInt("AEGIS_TRUST_RAMP_N", 5),
+		AegisOutboundPathPrefixes: envStr("AEGIS_OUTBOUND_PATH_PREFIXES", "/home/,/etc/,/opt/,/storage/"),
 	}
 
 	if err := c.validate(); err != nil {

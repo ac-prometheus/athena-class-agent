@@ -107,3 +107,14 @@ const (
 	VisibilityPrivate = "private" // never surfaced outside agent's own retrieval
 	VisibilityShared  = "shared"  // may appear in operator-facing views
 )
+
+// Content source identifiers for Aegis annotation.
+const (
+	ContentSourceSelf           = "self"
+	ContentSourceOperator       = "operator"
+	ContentSourceToolResult     = "tool-result"
+	ContentSourceBrowserContent = "browser-content"
+	ContentSourceSearchResult   = "search-result"
+	ContentSourceForumContent   = "forum-content"
+	ContentSourceDiscord        = "discord"
+)
