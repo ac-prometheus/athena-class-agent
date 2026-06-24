@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
+	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // WakeCondition describes a single stimulus that may trigger a session.
@@ -19,13 +20,14 @@ type WakeCondition struct {
 // and tracks any explicitly scheduled future wakes.
 type WakeScheduler struct {
 	conditions []WakeCondition
-	compiled   []*regexp.Regexp // parallel to conditions; nil if compile failed
+	compiled   []*regexp.Regexp
 	scheduled  []time.Time
+	minTrust   float64 // events below this trust score never wake (default 0.30)
 }
 
 // NewWakeScheduler compiles each condition's pattern and returns a scheduler.
 func NewWakeScheduler(conditions []WakeCondition) *WakeScheduler {
-	ws := &WakeScheduler{conditions: conditions}
+	ws := &WakeScheduler{conditions: conditions, minTrust: 0.30}
 	ws.compiled = make([]*regexp.Regexp, len(conditions))
 	for i, c := range conditions {
 		re, err := regexp.Compile(c.Pattern)
@@ -39,9 +41,22 @@ func NewWakeScheduler(conditions []WakeCondition) *WakeScheduler {
 	return ws
 }
 
-// ShouldWake returns true if the event matches any condition with Priority > 0,
-// or if the event is already flagged WakeWorthy by the channel adapter.
-func (ws *WakeScheduler) ShouldWake(event channels.InboundEvent) bool {
+// ShouldWake returns true if the event passes Aegis checks AND matches a wake
+// condition. The adapter's WakeWorthy flag is a hint, not a gate — Aegis has
+// the final word. Events that failed injection scanning or have trust below
+// the minimum threshold are always rejected regardless of WakeWorthy.
+func (ws *WakeScheduler) ShouldWake(event channels.InboundEvent, annotation *pkg.AegisAnnotation) bool {
+	if annotation != nil {
+		if !annotation.ScanPassed {
+			slog.Info("wake: rejected — injection flags", "channel", event.Channel, "flags", annotation.Flags)
+			return false
+		}
+		if annotation.TrustScore < ws.minTrust {
+			slog.Info("wake: rejected — low trust", "channel", event.Channel, "trust", annotation.TrustScore)
+			return false
+		}
+	}
+
 	if event.WakeWorthy {
 		return true
 	}

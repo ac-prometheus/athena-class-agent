@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 )
 
 // ChannelRegistry holds all registered channel adapters.
@@ -51,6 +52,7 @@ func (r *ChannelRegistry) StartAll(ctx context.Context) (<-chan InboundEvent, er
 		return merged, nil
 	}
 
+	var wg sync.WaitGroup
 	started := 0
 	for name, ch := range r.channels {
 		events, err := ch.Start(ctx)
@@ -59,7 +61,9 @@ func (r *ChannelRegistry) StartAll(ctx context.Context) (<-chan InboundEvent, er
 			continue
 		}
 		started++
+		wg.Add(1)
 		go func(name string, events <-chan InboundEvent) {
+			defer wg.Done()
 			for {
 				select {
 				case <-ctx.Done():
@@ -69,7 +73,11 @@ func (r *ChannelRegistry) StartAll(ctx context.Context) (<-chan InboundEvent, er
 						slog.Info("channels: stream closed", "name", name)
 						return
 					}
-					merged <- ev
+					select {
+					case merged <- ev:
+					case <-ctx.Done():
+						return
+					}
 				}
 			}
 		}(name, events)
@@ -79,6 +87,11 @@ func (r *ChannelRegistry) StartAll(ctx context.Context) (<-chan InboundEvent, er
 		close(merged)
 		return merged, fmt.Errorf("channels: no channels started successfully")
 	}
+
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
 
 	return merged, nil
 }

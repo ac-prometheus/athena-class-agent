@@ -7,7 +7,9 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -30,8 +32,7 @@ type DiscordConfig struct {
 type DiscordAdapter struct {
 	cfg    DiscordConfig
 	client *http.Client
-	// lastID tracks the newest message ID seen per channel (snowflake, as string).
-	// Using after= in subsequent requests avoids re-delivering old messages.
+	mu     sync.Mutex
 	lastID map[string]string
 }
 
@@ -86,13 +87,30 @@ func (d *DiscordAdapter) pollChannel(ctx context.Context, channelID string, out 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			msgs, err := d.fetchMessages(ctx, channelID, d.lastID[channelID])
+			d.mu.Lock()
+			afterID := d.lastID[channelID]
+			d.mu.Unlock()
+
+			msgs, retryAfter, err := d.fetchMessages(ctx, channelID, afterID)
+			if retryAfter > 0 {
+				slog.Warn("discord: rate limited", "channel", channelID, "retry_after_s", retryAfter)
+				select {
+				case <-time.After(time.Duration(retryAfter) * time.Second):
+				case <-ctx.Done():
+					return
+				}
+				continue
+			}
 			if err != nil {
 				slog.Warn("discord: fetch error", "channel", channelID, "err", err)
 				continue
 			}
 			for _, msg := range msgs {
-				out <- msg
+				select {
+				case out <- msg:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
 	}
@@ -108,7 +126,8 @@ type discordMessage struct {
 	} `json:"author"`
 }
 
-func (d *DiscordAdapter) fetchMessages(ctx context.Context, channelID, afterID string) ([]InboundEvent, error) {
+// fetchMessages returns events, a retry-after duration (>0 on rate limit), and error.
+func (d *DiscordAdapter) fetchMessages(ctx context.Context, channelID, afterID string) ([]InboundEvent, int, error) {
 	url := fmt.Sprintf("%s/channels/%s/messages?limit=50", discordAPIBase, channelID)
 	if afterID != "" {
 		url += "&after=" + afterID
@@ -116,24 +135,34 @@ func (d *DiscordAdapter) fetchMessages(ctx context.Context, channelID, afterID s
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bot "+d.cfg.Token)
 
 	resp, err := d.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusTooManyRequests {
+		retryAfter := 5
+		if ra := resp.Header.Get("Retry-After"); ra != "" {
+			if n, err := strconv.Atoi(ra); err == nil {
+				retryAfter = n
+			}
+		}
+		return nil, retryAfter, nil
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("discord: HTTP %d: %s", resp.StatusCode, string(body))
+		return nil, 0, fmt.Errorf("discord: HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
 	var raw []discordMessage
 	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
-		return nil, fmt.Errorf("discord: decode: %w", err)
+		return nil, 0, fmt.Errorf("discord: decode: %w", err)
 	}
 
 	events := make([]InboundEvent, 0, len(raw))
@@ -152,10 +181,12 @@ func (d *DiscordAdapter) fetchMessages(ctx context.Context, channelID, afterID s
 		newestID = m.ID
 	}
 	if newestID != "" {
+		d.mu.Lock()
 		d.lastID[channelID] = newestID
+		d.mu.Unlock()
 	}
 
-	return events, nil
+	return events, 0, nil
 }
 
 // Send posts a message to the specified Discord channel.

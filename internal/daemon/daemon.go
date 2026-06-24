@@ -100,7 +100,7 @@ func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent) {
 		"scan_passed", annotated.Annotation.ScanPassed,
 	)
 
-	if d.waker == nil || !d.waker.ShouldWake(ev) {
+	if d.waker == nil || !d.waker.ShouldWake(ev, &annotated.Annotation) {
 		if d.waker != nil {
 			d.waker.DeclineWake("no matching wake condition")
 		}
