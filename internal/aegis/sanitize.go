@@ -39,7 +39,9 @@ func isInvisible(r rune) bool {
 		0x200C, // ZERO WIDTH NON-JOINER
 		0x200D, // ZERO WIDTH JOINER
 		0xFEFF, // BOM / ZERO WIDTH NO-BREAK SPACE
-		0x2060: // WORD JOINER
+		0x2060, // WORD JOINER
+		0x00AD, // SOFT HYPHEN — survives NFKC, splits keywords
+		0x034F: // COMBINING GRAPHEME JOINER — survives NFKC
 		return true
 	}
 	// Directional overrides U+202A-U+202E

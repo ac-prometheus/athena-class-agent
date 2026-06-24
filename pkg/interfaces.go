@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"context"
+	"errors"
 	"time"
 )
 
@@ -299,6 +300,10 @@ type OutboundReport struct {
 	Clean    bool
 	Findings []string // descriptions of detected leaks (API keys, paths, etc.)
 }
+
+// ErrTrustNotFound is the sentinel TrustStore implementations must return
+// (wrapped) when GetTrust finds no record for a source.
+var ErrTrustNotFound = errors.New("trust: source not found")
 
 // TrustStore persists trust scores across sessions.
 type TrustStore interface {

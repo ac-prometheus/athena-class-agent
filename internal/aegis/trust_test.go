@@ -26,7 +26,7 @@ func (m *mockTrustStore) GetTrust(_ context.Context, source string) (float64, in
 	defer m.mu.Unlock()
 	score, ok := m.scores[source]
 	if !ok {
-		return 0.40, 0, errNotFound
+		return 0, 0, ErrTrustNotFound
 	}
 	return score, m.counts[source], nil
 }

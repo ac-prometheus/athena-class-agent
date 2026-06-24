@@ -40,10 +40,9 @@ func NewTrustScorer(cfg TrustConfig, store pkg.TrustStore) *TrustScorer {
 func (t *TrustScorer) Score(ctx context.Context, source string, flags []PatternMatch) (float64, error) {
 	score, interactions, err := t.store.GetTrust(ctx, source)
 	if err != nil {
-		if !errors.Is(err, errNotFound) {
+		if !errors.Is(err, ErrTrustNotFound) {
 			return t.cfg.SkepticalPrior, err
 		}
-		// New source — use skeptical prior.
 		score = t.cfg.SkepticalPrior
 		interactions = 0
 	}
@@ -54,7 +53,22 @@ func (t *TrustScorer) Score(ctx context.Context, source string, flags []PatternM
 		score = t.cfg.SkepticalPrior + weight*(score-t.cfg.SkepticalPrior)
 	}
 
-	// Multiplicative penalty per injection flag, floor at 0.10.
+	if score > t.cfg.MaxTrust {
+		score = t.cfg.MaxTrust
+	}
+
+	// Persist the base score (before flag penalty) — prevents permanent degradation.
+	// Flag penalties are session-local: they reduce the returned score but don't
+	// poison the stored baseline. Recovery happens naturally as clean interactions
+	// accumulate and the ramp blends toward the stored score.
+	if err := t.store.UpdateTrust(ctx, source, score); err != nil {
+		slog.Warn("aegis: failed to update trust score", "source", source, "err", err)
+	}
+	if err := t.store.IncrementInteractions(ctx, source); err != nil {
+		slog.Warn("aegis: failed to increment interactions", "source", source, "err", err)
+	}
+
+	// Multiplicative penalty per injection flag — applied to return value only.
 	for range flags {
 		score *= 0.7
 		if score < 0.10 {
@@ -63,20 +77,8 @@ func (t *TrustScorer) Score(ctx context.Context, source string, flags []PatternM
 		}
 	}
 
-	if score > t.cfg.MaxTrust {
-		score = t.cfg.MaxTrust
-	}
-
-	if err := t.store.UpdateTrust(ctx, source, score); err != nil {
-		slog.Warn("aegis: failed to update trust score", "source", source, "err", err)
-	}
-	if err := t.store.IncrementInteractions(ctx, source); err != nil {
-		slog.Warn("aegis: failed to increment interactions", "source", source, "err", err)
-	}
-
 	return score, nil
 }
 
-// errNotFound is a sentinel used when GetTrust finds no row.
-// Store implementations return this to distinguish missing vs. error.
-var errNotFound = errors.New("trust: source not found")
+// ErrTrustNotFound re-exports the sentinel from pkg for local use.
+var ErrTrustNotFound = pkg.ErrTrustNotFound

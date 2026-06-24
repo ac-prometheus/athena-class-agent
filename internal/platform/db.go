@@ -1698,7 +1698,7 @@ func (p *PostgresStore) ListSubstrateHistory(ctx context.Context) ([]pkg.Substra
 // ---------------------------------------------------------------------------
 
 // GetTrust returns the trust score and interaction count for a source.
-// Returns (0.40, 0, sql.ErrNoRows) if the source has no record.
+// Returns ErrTrustNotFound (wrapped) if the source has no record.
 func (s *SQLiteStore) GetTrust(ctx context.Context, source string) (float64, int, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT trust_score, interactions FROM trust_registry WHERE source = ?`,
@@ -1708,7 +1708,7 @@ func (s *SQLiteStore) GetTrust(ctx context.Context, source string) (float64, int
 	var interactions int
 	if err := row.Scan(&score, &interactions); err != nil {
 		if err == sql.ErrNoRows {
-			return 0.40, 0, sql.ErrNoRows
+			return 0, 0, fmt.Errorf("%w", pkg.ErrTrustNotFound)
 		}
 		return 0, 0, fmt.Errorf("platform: getting trust for %q: %w", source, err)
 	}
@@ -1753,7 +1753,7 @@ func (s *SQLiteStore) IncrementInteractions(ctx context.Context, source string) 
 // ---------------------------------------------------------------------------
 
 // GetTrust returns the trust score and interaction count for a source.
-// Returns (0.40, 0, pgx.ErrNoRows) if the source has no record.
+// Returns ErrTrustNotFound (wrapped) if the source has no record.
 func (p *PostgresStore) GetTrust(ctx context.Context, source string) (float64, int, error) {
 	row := p.pool.QueryRow(ctx,
 		`SELECT trust_score, interactions FROM trust_registry WHERE source = $1`,
@@ -1763,7 +1763,7 @@ func (p *PostgresStore) GetTrust(ctx context.Context, source string) (float64, i
 	var interactions int
 	if err := row.Scan(&score, &interactions); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return 0.40, 0, pgx.ErrNoRows
+			return 0, 0, fmt.Errorf("%w", pkg.ErrTrustNotFound)
 		}
 		return 0, 0, fmt.Errorf("platform: getting trust for %q: %w", source, err)
 	}
