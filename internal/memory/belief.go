@@ -63,13 +63,26 @@ func ComputeInferenceDistance(ctx context.Context, store pkg.BeliefStore, record
 	return 1, nil
 }
 
+// DecayReport summarises the outcome of a single end-of-session decay pass.
+type DecayReport struct {
+	TotalChecked        int
+	NewlyStale          int
+	ByInferenceDistance map[int]int // inference distance → count of stale records
+	ReVerified          int         // records whose state moved from stale to verified this session
+}
+
 // RunEndOfSessionDecay is a wrapper around FlagStaleBeliefs from retrieve.go.
 // It loads all T3/T4/T5 records with belief_meta, runs the staleness pass,
-// and returns the count of newly-flagged records. Idempotent.
-func RunEndOfSessionDecay(ctx context.Context, store pkg.BeliefStore, now time.Time, cfg DecayConfig) (int, error) {
+// and returns a DecayReport. Idempotent.
+func RunEndOfSessionDecay(ctx context.Context, store pkg.BeliefStore, now time.Time, cfg DecayConfig) (*DecayReport, error) {
 	records, err := store.LoadBeliefRecords(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("belief: loading records for decay pass: %w", err)
+		return nil, fmt.Errorf("belief: loading records for decay pass: %w", err)
+	}
+
+	report := &DecayReport{
+		TotalChecked:        len(records),
+		ByInferenceDistance: make(map[int]int),
 	}
 
 	updateFn := func(ctx context.Context, table, id, state string) error {
@@ -78,10 +91,29 @@ func RunEndOfSessionDecay(ctx context.Context, store pkg.BeliefStore, now time.T
 
 	count, err := FlagStaleBeliefs(ctx, records, now, cfg.DecayRate, cfg.InferenceDecayBase, cfg.StaleThreshold, updateFn)
 	if err != nil {
-		return count, fmt.Errorf("belief: decay pass failed: %w", err)
+		return report, fmt.Errorf("belief: decay pass failed: %w", err)
+	}
+	report.NewlyStale = count
+
+	// Compute per-inference-distance breakdown for records that became stale this pass.
+	// FlagStaleBeliefs skips records already stale, so any non-stale record below
+	// threshold was newly flagged.
+	for _, rec := range records {
+		if rec.Belief == nil || rec.Belief.VerificationState == "stale" {
+			continue
+		}
+		conf := rec.Belief.Confidence(now, cfg.DecayRate, cfg.InferenceDecayBase)
+		if conf >= cfg.StaleThreshold {
+			continue
+		}
+		dist, distErr := ComputeInferenceDistance(ctx, store, rec.ID)
+		if distErr != nil {
+			dist = -1
+		}
+		report.ByInferenceDistance[dist]++
 	}
 
 	slog.Info("belief: end-of-session decay pass complete",
 		"flagged", count, "total_checked", len(records))
-	return count, nil
+	return report, nil
 }

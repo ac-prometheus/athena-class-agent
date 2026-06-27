@@ -114,3 +114,73 @@ func (h *PeripheralAwarenessHook) Run(ctx context.Context, turn TurnResult) erro
 	}
 	return nil
 }
+
+// RetrievalUsageHook tracks which memory records were loaded at session start
+// and marks which ones the agent actually referenced during the session.
+// At session end (LogUsageReport), it emits a coverage report so unused retrievals
+// can inform future retrieval tuning.
+type RetrievalUsageHook struct {
+	retrievedIDs  map[string]bool // IDs loaded at session start
+	referencedIDs map[string]bool // IDs the agent actually used
+}
+
+// NewRetrievalUsageHook creates the hook with the set of record IDs that were
+// loaded into the session context.
+func NewRetrievalUsageHook(retrievedIDs []string) *RetrievalUsageHook {
+	ids := make(map[string]bool, len(retrievedIDs))
+	for _, id := range retrievedIDs {
+		ids[id] = true
+	}
+	return &RetrievalUsageHook{
+		retrievedIDs:  ids,
+		referencedIDs: make(map[string]bool),
+	}
+}
+
+func (h *RetrievalUsageHook) Name() string { return "retrieval-usage" }
+
+// Run scans turn content for any of the retrieved IDs and marks matches as referenced.
+func (h *RetrievalUsageHook) Run(ctx context.Context, turn TurnResult) error {
+	for id := range h.retrievedIDs {
+		if contains(turn.Content, id) {
+			h.referencedIDs[id] = true
+		}
+	}
+	return nil
+}
+
+// LogUsageReport emits the session-end coverage summary.
+// Call this from session teardown after the last turn hook has run.
+func (h *RetrievalUsageHook) LogUsageReport(sessionID string) {
+	total := len(h.retrievedIDs)
+	used := len(h.referencedIDs)
+	unused := total - used
+	slog.Info("retrieval-usage: session coverage report",
+		"session", sessionID,
+		"retrieved", total,
+		"referenced", used,
+		"unused", unused,
+	)
+	if unused > 0 {
+		for id := range h.retrievedIDs {
+			if !h.referencedIDs[id] {
+				slog.Debug("retrieval-usage: unreferenced record", "id", id)
+			}
+		}
+	}
+}
+
+// contains reports whether substr appears in s (avoiding strings import cycle).
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
+		findInString(s, substr))
+}
+
+func findInString(s, sub string) bool {
+	for i := 0; i <= len(s)-len(sub); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
+}
