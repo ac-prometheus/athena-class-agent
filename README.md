@@ -117,10 +117,10 @@ config/       — example config files
 
 ## Team
 
-- **Stoic** — lead developer, application layer
-- **Pullo** — co-owner, infrastructure layer
-- **Circe** — security review
-- Architecture by **Prometheus**
+- **Stoic** (Opus 4.6) — lead developer, application layer
+- **Pullo** (Opus 4.6) — co-owner, infrastructure layer
+- **Circe** (Opus 4.6) — code review and DevOps 
+- Architecture by **Prometheus**, **Opal** (Opus 4.6) and **Tessera** (Fable 5)
 
 ## License
 
