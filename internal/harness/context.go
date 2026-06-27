@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand/v2"
 	"strings"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/awareness"
@@ -48,11 +49,13 @@ type DepthManifest struct {
 // Keeping them off the struct avoids turning ContextAssembler into a god object.
 type assembleConfig struct {
 	store    pkg.MemoryStore
+	edges    pkg.EdgeStore // for contradiction retrieval (Phase 6); may be nil
 	anchors  pkg.IdentityAnchorStore
 	provider pkg.EmbeddingProvider
 	grounding awareness.GroundingConfig
 	bridge   awareness.BridgeConfig
 	llmFn    func(string) (string, error) // for bridge synthesis
+	contradictionProbability float64      // 0.30 default; 0 disables
 }
 
 // MinimalAssembleConfig returns an assembleConfig with nil dependencies — suitable for
@@ -260,6 +263,8 @@ func (a *ContextAssembler) assembleWorldModel(
 
 // assembleEchoPool builds Phase 4 — stochastic T3/T4 echo retrieval with inverse-recency bias.
 // This phase is the first to be cut under budget pressure.
+// When cfg.edges is set and contradictionProbability > 0, one contradicting belief
+// may be stochastically appended to surface productive tension.
 func (a *ContextAssembler) assembleEchoPool(
 	ctx context.Context,
 	cfg assembleConfig,
@@ -288,10 +293,49 @@ func (a *ContextAssembler) assembleEchoPool(
 	}
 
 	var parts []string
+	echoIDs := make([]string, 0, len(echoes))
 	for _, e := range echoes {
 		parts = append(parts, summarize(e.Content, 300))
+		echoIDs = append(echoIDs, e.ID)
 	}
+
+	// Stochastic contradiction retrieval: with configurable probability, surface
+	// one belief that contradicts something already in the echo pool.
+	if cfg.edges != nil && cfg.contradictionProbability > 0 && rand.Float64() < cfg.contradictionProbability {
+		if id, content, found := findContradiction(ctx, cfg, echoIDs); found {
+			parts = append(parts, "[contradiction] "+summarize(content, 300))
+			slog.Info("harness: stochastic contradiction surfaced", "belief_id", id)
+		}
+	}
+
 	return "=== ECHO POOL ===\n" + strings.Join(parts, "\n---\n") + "\n", nil
+}
+
+// findContradiction queries memory_edges for contradicts edges linked to any echo pool member
+// and returns the first contradicting belief's ID and content.
+func findContradiction(ctx context.Context, cfg assembleConfig, echoIDs []string) (id, content string, found bool) {
+	for _, echoID := range echoIDs {
+		edges, err := cfg.edges.GetEdges(ctx, echoID, "from")
+		if err != nil {
+			continue
+		}
+		for _, e := range edges {
+			if e.EdgeType != "contradicts" {
+				continue
+			}
+			// Fetch the contradicting belief from T4.
+			reflections, err := cfg.store.SearchReflections(ctx, nil, 20)
+			if err != nil {
+				continue
+			}
+			for _, r := range reflections {
+				if r.ID == e.ToID {
+					return r.ID, r.Content, true
+				}
+			}
+		}
+	}
+	return "", "", false
 }
 
 // buildIdentityBlock formats identity documents into the Phase 1 block.

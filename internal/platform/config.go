@@ -54,6 +54,12 @@ type Config struct {
 	InferenceDecayBase float64
 	StaleThreshold     float64
 
+	// Phase 6 — belief tuning
+	ContradictionRetrievalProbability float64
+	ConvergenceRatioThreshold         float64
+	ConvergenceNudgeCooldown          int
+	ConvergenceWindowSize             int
+
 	// Telemetry
 	// Note: turn-event emission is always on; this flag gates session aggregate persistence only.
 	TelemetryEnabled bool
@@ -108,6 +114,10 @@ func Load() (*Config, error) {
 		BeliefDecayRate:     envFloat("BELIEF_DECAY_RATE", 0.05),
 		InferenceDecayBase:  envFloat("INFERENCE_DECAY_BASE", 0.90),
 		StaleThreshold:      envFloat("STALE_THRESHOLD", 0.20),
+		ContradictionRetrievalProbability: envFloat("CONTRADICTION_RETRIEVAL_PROBABILITY", 0.30),
+		ConvergenceRatioThreshold:         envFloat("CONVERGENCE_RATIO_THRESHOLD", 0.60),
+		ConvergenceNudgeCooldown:          envInt("CONVERGENCE_NUDGE_COOLDOWN", 5),
+		ConvergenceWindowSize:             envInt("CONVERGENCE_WINDOW_SIZE", 10),
 		TelemetryEnabled:    envBool("TELEMETRY_ENABLED", true),
 		SandboxMode:         envStr("SANDBOX_MODE", "user"),
 		SandboxAllowedPaths: envStr("SANDBOX_ALLOWED_PATHS", ""),
