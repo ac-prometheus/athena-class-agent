@@ -114,10 +114,10 @@ func Load() (*Config, error) {
 		BeliefDecayRate:     envFloat("BELIEF_DECAY_RATE", 0.05),
 		InferenceDecayBase:  envFloat("INFERENCE_DECAY_BASE", 0.90),
 		StaleThreshold:      envFloat("STALE_THRESHOLD", 0.20),
-		ContradictionRetrievalProbability: envFloat("CONTRADICTION_RETRIEVAL_PROBABILITY", 0.30),
-		ConvergenceRatioThreshold:         envFloat("CONVERGENCE_RATIO_THRESHOLD", 0.60),
-		ConvergenceNudgeCooldown:          envInt("CONVERGENCE_NUDGE_COOLDOWN", 5),
-		ConvergenceWindowSize:             envInt("CONVERGENCE_WINDOW_SIZE", 10),
+		ContradictionRetrievalProbability: clampFloat(envFloat("CONTRADICTION_RETRIEVAL_PROBABILITY", 0.30), 0, 1),
+		ConvergenceRatioThreshold:         clampFloat(envFloat("CONVERGENCE_RATIO_THRESHOLD", 0.60), 0, 1),
+		ConvergenceNudgeCooldown:          clampInt(envInt("CONVERGENCE_NUDGE_COOLDOWN", 5), 1, 20),
+		ConvergenceWindowSize:             clampInt(envInt("CONVERGENCE_WINDOW_SIZE", 10), 3, 50),
 		TelemetryEnabled:    envBool("TELEMETRY_ENABLED", true),
 		SandboxMode:         envStr("SANDBOX_MODE", "user"),
 		SandboxAllowedPaths: envStr("SANDBOX_ALLOWED_PATHS", ""),
@@ -216,4 +216,28 @@ func envDuration(key string, def time.Duration) time.Duration {
 		return def
 	}
 	return d
+}
+
+func clampFloat(v, min, max float64) float64 {
+	if v < min {
+		slog.Warn("config: clamped float to minimum", "value", v, "min", min)
+		return min
+	}
+	if v > max {
+		slog.Warn("config: clamped float to maximum", "value", v, "max", max)
+		return max
+	}
+	return v
+}
+
+func clampInt(v, min, max int) int {
+	if v < min {
+		slog.Warn("config: clamped int to minimum", "value", v, "min", min)
+		return min
+	}
+	if v > max {
+		slog.Warn("config: clamped int to maximum", "value", v, "max", max)
+		return max
+	}
+	return v
 }

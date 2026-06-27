@@ -1,7 +1,6 @@
 package awareness
 
 import (
-	"fmt"
 	"math"
 	"math/rand/v2"
 	"sort"
@@ -35,8 +34,17 @@ type PeripheralAwareness struct {
 type NudgeInjection struct {
 	Turn     int
 	Velocity float64
-	Command  string // CLI-command suggestion surfaced to the agent
+	Verb     string   // CLI verb (e.g. "memory")
+	Args     []string // CLI args (e.g. ["search", "topic"])
 	Topic    string
+}
+
+// Command returns a display-safe CLI suggestion. Never pass this to sh -c.
+func (n *NudgeInjection) Command() string {
+	if len(n.Args) == 0 {
+		return n.Verb
+	}
+	return n.Verb + " " + strings.Join(n.Args, " ")
 }
 
 // NewPeripheralAwareness creates a PeripheralAwareness with the given threshold.
@@ -115,7 +123,8 @@ func (pa *PeripheralAwareness) CheckNudge(turn int, turnEmbedding []float32, top
 		Turn:     turn,
 		Velocity: velocity,
 		Topic:    topic,
-		Command:  fmt.Sprintf(`memory search "%s" | head -5`, topic),
+		Verb: "memory",
+		Args: []string{"search", topic},
 	}
 
 	pa.nudgeCount++
@@ -138,7 +147,8 @@ func (pa *PeripheralAwareness) CheckConvergenceNudge(session int, metrics *memor
 	return &NudgeInjection{
 		Turn:     -1, // session-level nudge, not turn-level
 		Topic:    "grounded experience",
-		Command:  fmt.Sprintf(`memory search "direct experience session log" | head -5 # ratio %.2f over %d sessions`, ratio, n),
+		Verb: "memory",
+		Args: []string{"search", "direct experience session log"},
 		Velocity: ratio,
 	}
 }

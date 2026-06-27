@@ -4,7 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math/rand/v2"
+	"crypto/rand"
+	"encoding/binary"
 	"strings"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/awareness"
@@ -301,7 +302,7 @@ func (a *ContextAssembler) assembleEchoPool(
 
 	// Stochastic contradiction retrieval: with configurable probability, surface
 	// one belief that contradicts something already in the echo pool.
-	if cfg.edges != nil && cfg.contradictionProbability > 0 && rand.Float64() < cfg.contradictionProbability {
+	if cfg.edges != nil && cfg.contradictionProbability > 0 && cryptoRandFloat() < cfg.contradictionProbability {
 		if id, content, found := findContradiction(ctx, cfg, echoIDs); found {
 			parts = append(parts, "[contradiction] "+summarize(content, 300))
 			slog.Info("harness: stochastic contradiction surfaced", "belief_id", id)
@@ -336,6 +337,16 @@ func findContradiction(ctx context.Context, cfg assembleConfig, echoIDs []string
 		}
 	}
 	return "", "", false
+}
+
+// cryptoRandFloat returns a cryptographically random float64 in [0, 1).
+// Used for contradiction retrieval gating where belief store privacy matters.
+func cryptoRandFloat() float64 {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return 1.0 // fail closed — don't surface contradiction on rand failure
+	}
+	return float64(binary.LittleEndian.Uint64(buf[:])>>11) / (1 << 53)
 }
 
 // buildIdentityBlock formats identity documents into the Phase 1 block.
