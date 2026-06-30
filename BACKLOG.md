@@ -29,6 +29,12 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] Double-confirm for `SKIP_WITNESS_CHECK` — Red recommended interactive confirmation
 - [ ] Network egress proxy — deferred hardening item per spec
 
+### TMA-NM Laundering Channels (Louck, arXiv:2606.24322)
+- [ ] Summarization channel — T2→T3 compression without Aegis annotation is the attack surface. Compression guard (refuse to compress unannoted content) is tracked in Red's items but not yet implemented
+- [ ] Trusted-tool echo — vault/oracle retrieval of poisoned content bypasses Aegis if the tool is trusted. Tool results should carry provenance labels
+- [ ] Manufactured corroboration — multiple poisoned sources reinforcing the same claim. Cross-source dedup or contradiction detection before belief formation
+- [ ] Write-time authority binding — every memory record should carry a non-forgeable label of who wrote it. More rigorous than current provenance tagging
+
 ## Infrastructure
 
 - [ ] `GetReflectionByID` method on MemoryStore — needed for O(1) contradiction lookup
