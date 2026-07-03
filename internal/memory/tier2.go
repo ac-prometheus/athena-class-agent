@@ -17,6 +17,7 @@ var validContentSources = map[string]bool{
 	"browser-content": true,
 	"search-result":   true,
 	"forum-content":   true,
+	"discord":         true,
 }
 
 // AppendLog validates and appends a T2 experiential log entry.
