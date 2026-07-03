@@ -5,6 +5,8 @@ import (
 	"log/slog"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
+	"github.com/ac-prometheus/athena-class-agent/internal/harness"
+	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -16,12 +18,13 @@ type Daemon struct {
 	registry *channels.ChannelRegistry
 	gateway  pkg.ContentGateway
 	waker    *WakeScheduler
+	db       platform.DB // optional; enables checkpoint scan on startup
 }
 
 // sessionRunner is the minimal interface the daemon needs from harness.
 // Keeps daemon from importing harness directly in Phase 1.
 type sessionRunner interface {
-	RunSession(wakeReason string) error
+	RunSession(wakeReason string, inbandNotes []string) error
 }
 
 // Config holds daemon-level configuration.
@@ -35,6 +38,11 @@ type Config struct {
 // Pass nil registry/gateway to use the Phase 1 one-shot fallback.
 func New(cfg Config, runner sessionRunner) *Daemon {
 	return &Daemon{cfg: cfg, harness: runner}
+}
+
+// WithDB attaches a database handle so the daemon can run CheckpointScan at startup.
+func (d *Daemon) WithDB(db platform.DB) {
+	d.db = db
 }
 
 // WithChannels attaches a channel registry, Aegis gateway, and wake scheduler.
@@ -54,19 +62,23 @@ func (d *Daemon) WithChannels(
 //
 // Falls back to a single one-shot session when no channels are registered.
 func (d *Daemon) Run(ctx context.Context) error {
+	// Scan for sessions that were interrupted by a crash or OOM before the first wake.
+	startupNotes := d.scanInterruptedSessions(ctx)
+
 	if d.registry == nil || len(d.registry.List()) == 0 {
 		slog.Info("daemon: no channels configured — running one-shot session")
-		return d.harness.RunSession("daemon-startup")
+		return d.harness.RunSession("daemon-startup", startupNotes)
 	}
 
 	events, err := d.registry.StartAll(ctx)
 	if err != nil {
 		slog.Warn("daemon: channel startup error, falling back to one-shot", "err", err)
-		return d.harness.RunSession("daemon-startup")
+		return d.harness.RunSession("daemon-startup", startupNotes)
 	}
 
 	slog.Info("daemon: event loop started", "channels", len(d.registry.List()))
 
+	firstWake := true
 	for {
 		select {
 		case <-ctx.Done():
@@ -78,14 +90,37 @@ func (d *Daemon) Run(ctx context.Context) error {
 				slog.Info("daemon: all channels closed")
 				return nil
 			}
-			d.handleEvent(ctx, ev)
+			var notes []string
+			if firstWake {
+				notes = startupNotes
+				firstWake = false
+			}
+			d.handleEvent(ctx, ev, notes)
 		}
 	}
 }
 
+// scanInterruptedSessions calls CheckpointScan and returns in-band notes for any
+// sessions that were interrupted. Returns nil if DB is unavailable or no interruptions found.
+func (d *Daemon) scanInterruptedSessions(ctx context.Context) []string {
+	if d.db == nil {
+		return nil
+	}
+	interrupted, err := harness.CheckpointScan(ctx, d.db)
+	if err != nil {
+		slog.Warn("daemon: checkpoint scan failed", "err", err)
+		return nil
+	}
+	notes := make([]string, 0, len(interrupted))
+	for _, is := range interrupted {
+		notes = append(notes, is.InterruptNote())
+	}
+	return notes
+}
+
 // handleEvent processes a single inbound channel event through Aegis and,
 // if warranted, triggers a new agent session.
-func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent) {
+func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent, inbandNotes []string) {
 	contentSource := contentSourceForChannel(ev.Channel)
 
 	annotated, err := d.gateway.ProcessInbound(ctx, ev.Content, ev.Channel, contentSource)
@@ -110,7 +145,7 @@ func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent) {
 	wakeReason := "channel:" + ev.Channel
 	slog.Info("daemon: wake condition met", "reason", wakeReason, "sender", ev.SenderName)
 
-	if err := d.harness.RunSession(wakeReason); err != nil {
+	if err := d.harness.RunSession(wakeReason, inbandNotes); err != nil {
 		slog.Error("daemon: session error", "err", err)
 	}
 }

@@ -77,14 +77,16 @@ type phase1Runner struct {
 	assembler *harness.ContextAssembler
 }
 
-func (r *phase1Runner) RunSession(wakeReason string) error {
-	assembled, err := r.assembler.Assemble(context.Background(), harness.MinimalAssembleConfig())
+func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error {
+	cfg := harness.MinimalAssembleConfig()
+	cfg.InbandNotes = inbandNotes
+	assembled, err := r.assembler.Assemble(context.Background(), cfg)
 	if err != nil {
 		return fmt.Errorf("assembling context: %w", err)
 	}
 	systemPrompt := assembled.SystemPrompt
 
-	session := harness.NewSession(r.cfg.AgentName, wakeReason)
+	session := harness.NewSession(r.cfg.AgentName, wakeReason, nil)
 	budget := harness.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)
 	hooks := engine.NewHookPipeline()
 

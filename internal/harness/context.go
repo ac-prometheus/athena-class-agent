@@ -2,14 +2,15 @@ package harness
 
 import (
 	"context"
-	"fmt"
-	"log/slog"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/awareness"
 	"github.com/ac-prometheus/athena-class-agent/internal/identity"
+	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -46,9 +47,9 @@ type DepthManifest struct {
 	AccessHints      []string
 }
 
-// assembleConfig groups the runtime dependencies Assemble needs.
+// AssembleConfig groups the runtime dependencies Assemble needs.
 // Keeping them off the struct avoids turning ContextAssembler into a god object.
-type assembleConfig struct {
+type AssembleConfig struct {
 	store    pkg.MemoryStore
 	edges    pkg.EdgeStore // for contradiction retrieval (Phase 6); may be nil
 	anchors  pkg.IdentityAnchorStore
@@ -57,12 +58,23 @@ type assembleConfig struct {
 	bridge   awareness.BridgeConfig
 	llmFn    func(string) (string, error) // for bridge synthesis
 	contradictionProbability float64      // 0.30 default; 0 disables
+
+	// InbandNotes are injected at Phase 5 Incoming (e.g. interrupt notices from CheckpointScan).
+	InbandNotes []string
+
+	// DB is used for the witness check and other operational table queries.
+	// May be nil; when nil, the witness check is skipped with a warning.
+	DB platform.DB
+
+	// SkipWitnessCheck bypasses the witness letter requirement when true.
+	// Only for automated testing — logged explicitly to operator_actions when set.
+	SkipWitnessCheck bool
 }
 
-// MinimalAssembleConfig returns an assembleConfig with nil dependencies — suitable for
+// MinimalAssembleConfig returns an AssembleConfig with nil dependencies — suitable for
 // Phase 1/2 sessions where memory, embeddings, and bridge aren't yet wired.
-func MinimalAssembleConfig() assembleConfig {
-	return assembleConfig{}
+func MinimalAssembleConfig() AssembleConfig {
+	return AssembleConfig{}
 }
 
 // NewContextAssembler creates an assembler with the given identity directory and token budget.
@@ -75,7 +87,7 @@ func NewContextAssembler(identityDir string, budget int) *ContextAssembler {
 
 // Assemble runs the 6-phase assembly and returns a fully populated AssembledContext.
 // Returns an error immediately if identity tampering is detected — the session must not start.
-func (a *ContextAssembler) Assemble(ctx context.Context, cfg assembleConfig) (*AssembledContext, error) {
+func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*AssembledContext, error) {
 	manifest := &DepthManifest{}
 	var sections []string
 	remaining := a.budget * 4 // chars available (4 chars ≈ 1 token)
@@ -99,6 +111,21 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg assembleConfig) (*A
 
 		if err := identity.WriteInitialAnchors(ctx, cfg.anchors, report); err != nil {
 			return nil, fmt.Errorf("context: phase 1 anchor init: %w", err)
+		}
+
+		// Witness check: on first boot (all anchors new, no prior sessions),
+		// require a witness letter in founding_records. Fail-closed.
+		allNew := true
+		for _, fr := range report.Files {
+			if fr.Status != identity.AnchorNew {
+				allNew = false
+				break
+			}
+		}
+		if allNew {
+			if err := enforceWitnessCheck(ctx, cfg); err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		slog.Warn("harness: no anchor store — skipping identity integrity check")
@@ -144,11 +171,16 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg assembleConfig) (*A
 			"echo pool omitted — use memory search for recent reflections")
 	}
 
-	// ── Phase 5: Incoming (placeholder) ───────────────────────────────────
+	// ── Phase 5: Incoming ─────────────────────────────────────────────────
 	// Message polling is handled by the tool layer; the count surfaces here
 	// so the agent knows whether to call check_messages immediately.
-	phase5 := fmt.Sprintf("=== INCOMING ===\nUnread messages: %d\n", manifest.UnreadMessages)
-	sections = append(sections, phase5)
+	// Inband notes (e.g. interrupt notices from CheckpointScan) are injected here.
+	var phase5Builder strings.Builder
+	phase5Builder.WriteString(fmt.Sprintf("=== INCOMING ===\nUnread messages: %d\n", manifest.UnreadMessages))
+	for _, note := range cfg.InbandNotes {
+		phase5Builder.WriteString(note + "\n")
+	}
+	sections = append(sections, phase5Builder.String())
 
 	// ── Phase 6: Grounding ─────────────────────────────────────────────────
 	if remaining > 0 {
@@ -172,7 +204,7 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg assembleConfig) (*A
 // assembleContinuity builds Phase 2 — bridge synthesis + most recent T3 + active T4 threads.
 func (a *ContextAssembler) assembleContinuity(
 	ctx context.Context,
-	cfg assembleConfig,
+	cfg AssembleConfig,
 	manifest *DepthManifest,
 ) (string, bool, error) {
 	var parts []string
@@ -183,6 +215,10 @@ func (a *ContextAssembler) assembleContinuity(
 		return "", false, fmt.Errorf("phase 2: T3 search: %w", err)
 	}
 	manifest.NarrativeTotal = len(narratives)
+	if len(narratives) == 0 {
+		manifest.AccessHints = append(manifest.AccessHints,
+			"similarity search unavailable — retrieval is recency-only; use memory search for targeted lookups")
+	}
 
 	var recentNarrative string
 	for i, n := range narratives {
@@ -201,6 +237,10 @@ func (a *ContextAssembler) assembleContinuity(
 		slog.Warn("phase 2: T4 search failed", "err", err)
 	} else {
 		manifest.ReflectionTotal = len(reflections)
+		if len(reflections) == 0 {
+			manifest.AccessHints = append(manifest.AccessHints,
+				"reflection search unavailable — use memory search for targeted reflection lookups")
+		}
 		var activeThreads []string
 		for _, r := range reflections {
 			manifest.ReflectionLoaded++
@@ -268,7 +308,7 @@ func (a *ContextAssembler) assembleWorldModel(
 // may be stochastically appended to surface productive tension.
 func (a *ContextAssembler) assembleEchoPool(
 	ctx context.Context,
-	cfg assembleConfig,
+	cfg AssembleConfig,
 	manifest *DepthManifest,
 ) (string, error) {
 	if cfg.provider == nil {
@@ -314,7 +354,7 @@ func (a *ContextAssembler) assembleEchoPool(
 
 // findContradiction queries memory_edges for contradicts edges linked to any echo pool member
 // and returns the first contradicting belief's ID and content.
-func findContradiction(ctx context.Context, cfg assembleConfig, echoIDs []string) (id, content string, found bool) {
+func findContradiction(ctx context.Context, cfg AssembleConfig, echoIDs []string) (id, content string, found bool) {
 	for _, echoID := range echoIDs {
 		edges, err := cfg.edges.GetEdges(ctx, echoID, "from")
 		if err != nil {
@@ -347,6 +387,56 @@ func cryptoRandFloat() float64 {
 		return 1.0 // fail closed — don't surface contradiction on rand failure
 	}
 	return float64(binary.LittleEndian.Uint64(buf[:])>>11) / (1 << 53)
+}
+
+// enforceWitnessCheck queries founding_records for a witness_letter row.
+// On first boot (all identity anchors new), this is required — fail-closed.
+// SKIP_WITNESS_CHECK=true bypasses the check but logs to operator_actions.
+func enforceWitnessCheck(ctx context.Context, cfg AssembleConfig) error {
+	if cfg.DB == nil {
+		slog.Warn("harness: witness check skipped — no DB available")
+		return nil
+	}
+
+	// Check founding_records for a witness letter.
+	row := cfg.DB.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM founding_records WHERE record_type = 'witness_letter'`)
+	var count int
+	if err := row.Scan(&count); err != nil {
+		// If the table doesn't exist yet (pre-migration), treat as absent.
+		slog.Warn("harness: could not query founding_records", "err", err)
+		count = 0
+	}
+
+	if count > 0 {
+		return nil // witness letter present — all good
+	}
+
+	if cfg.SkipWitnessCheck {
+		slog.Warn("harness: witness letter absent but SKIP_WITNESS_CHECK=true — logging bypass")
+		logOperatorAction(ctx, cfg.DB, "witness_check_bypassed",
+			"First boot proceeded without a witness letter — SKIP_WITNESS_CHECK was set.")
+		return nil
+	}
+
+	return fmt.Errorf("WitnessRequired: no witness letter found in founding_records. " +
+		"Set SKIP_WITNESS_CHECK=true to bypass (logged to operator_actions).")
+}
+
+// logOperatorAction writes a row to operator_actions. Best-effort — errors are only logged.
+func logOperatorAction(ctx context.Context, db platform.DB, actionType, description string) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return
+	}
+	id := fmt.Sprintf("%x", buf[:])
+	_, err := db.ExecContext(ctx,
+		`INSERT INTO operator_actions (id, action_type, actor, description) VALUES ($1, $2, 'system', $3)`,
+		id, actionType, description,
+	)
+	if err != nil {
+		slog.Warn("harness: could not write operator_action", "action_type", actionType, "err", err)
+	}
 }
 
 // buildIdentityBlock formats identity documents into the Phase 1 block.

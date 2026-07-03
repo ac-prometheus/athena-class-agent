@@ -143,7 +143,6 @@ func (pa *PeripheralAwareness) CheckConvergenceNudge(session int, metrics *memor
 	}
 	pa.lastNudgeSession = session
 	ratio := pa.convergenceWindow.RollingRatio()
-	n := len(pa.convergenceWindow.History)
 	return &NudgeInjection{
 		Turn:     -1, // session-level nudge, not turn-level
 		Topic:    "grounded experience",

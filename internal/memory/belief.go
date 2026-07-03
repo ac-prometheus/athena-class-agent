@@ -22,7 +22,7 @@ func DefaultDecayConfig() DecayConfig {
 	return DecayConfig{
 		DecayRate:          0.05,
 		InferenceDecayBase: 0.90,
-		StaleThreshold:     0.3,
+		StaleThreshold:     0.20,
 	}
 }
 

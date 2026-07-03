@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // AdvisorProvider describes a single external advisor endpoint.
@@ -54,17 +56,24 @@ func LoadAdvisorConfig(path string) (*AdvisorConfig, error) {
 
 // Advisor routes questions to external LLM providers.
 type Advisor struct {
-	cfg    AdvisorConfig
-	http   *http.Client
-	used   atomic.Int32
+	cfg     AdvisorConfig
+	http    *http.Client
+	used    atomic.Int32
+	gateway pkg.ContentGateway // may be nil; when set, all responses pass through Aegis
 }
 
 // NewAdvisor creates an Advisor with a 30-second HTTP timeout.
 func NewAdvisor(cfg AdvisorConfig) *Advisor {
 	return &Advisor{
-		cfg: cfg,
+		cfg:  cfg,
 		http: &http.Client{Timeout: 30 * time.Second},
 	}
+}
+
+// WithGateway attaches an Aegis gateway so advisor responses are scanned before returning.
+func (a *Advisor) WithGateway(gw pkg.ContentGateway) *Advisor {
+	a.gateway = gw
+	return a
 }
 
 // Ask sends question to the named provider and returns an attributed response.
@@ -111,6 +120,16 @@ func (a *Advisor) Ask(ctx context.Context, question, providerName string) (strin
 	}
 	if err != nil {
 		return "", err
+	}
+
+	// Route through Aegis before returning — advisor output is external content.
+	if a.gateway != nil {
+		annotated, gErr := a.gateway.ProcessInbound(ctx, []byte(content), "advisor:"+provider.Name, pkg.ContentSourceToolResult)
+		if gErr != nil {
+			slog.Warn("advisor: aegis scan failed, returning raw response", "provider", provider.Name, "err", gErr)
+		} else {
+			content = annotated.Normalized
+		}
 	}
 
 	a.used.Add(1)
