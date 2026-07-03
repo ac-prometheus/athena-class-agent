@@ -394,8 +394,12 @@ func cryptoRandFloat() float64 {
 // SKIP_WITNESS_CHECK=true bypasses the check but logs to operator_actions.
 func enforceWitnessCheck(ctx context.Context, cfg AssembleConfig) error {
 	if cfg.DB == nil {
-		slog.Warn("harness: witness check skipped — no DB available")
-		return nil
+		if cfg.SkipWitnessCheck {
+			slog.Warn("harness: witness check skipped — no DB available, SKIP_WITNESS_CHECK=true")
+			return nil
+		}
+		return fmt.Errorf("WitnessRequired: no DB connection available to verify witness letter. " +
+			"Set SKIP_WITNESS_CHECK=true to bypass (development only).")
 	}
 
 	// Check founding_records for a witness letter.
