@@ -1037,10 +1037,10 @@ func TestBiTemporalDesign(t *testing.T) {
 	t.Log("bi-temporal design verified: invalidation takes time.Time, not delete")
 }
 
-// TestContentSourceCount verifies that exactly 6 content source values are
-// accepted by tier2. Adding a 7th without updating tests catches drift.
+// TestContentSourceCount verifies that exactly 7 content source values are
+// accepted by tier2. Adding an 8th without updating tests catches drift.
 func TestContentSourceCount(t *testing.T) {
-	if len(validContentSources) != 6 {
-		t.Errorf("expected exactly 6 valid content sources, got %d", len(validContentSources))
+	if len(validContentSources) != 7 {
+		t.Errorf("expected exactly 7 valid content sources, got %d", len(validContentSources))
 	}
 }
