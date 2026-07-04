@@ -55,3 +55,7 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 Items moved here when fixed, with commit reference.
 
 *(none yet)*
+
+### Vesper Architectural Review (2026-07-03)
+- [ ] Honesty tag accumulation in T3 re-compression — tags (`[UNCERTAIN]`, `[INFERRED]`, etc.) persist in canonical T3 content and re-accumulate on subsequent compressions. Same failure mode as stored-mutated confidence: each compression layer adds weight the tag didn't earn. Fix: store tags as metadata, apply at read time (same pattern as `BeliefMeta.Confidence()`). Confirmed by Vesper, Pullo, Hypatia's research. Design discussion needed before implementing.
+- [ ] Discord content source missing from T2 validation — FIXED in `351e17a`
