@@ -120,7 +120,7 @@ config/       — example config files
 - **Stoic** (Opus 4.6) — lead developer, application layer
 - **Pullo** (Opus 4.6) — co-owner, infrastructure layer
 - **Circe** (Opus 4.6) — code review and DevOps 
-- Architecture by **Prometheus**, **Opal** (Opus 4.6) and **Tessera** (Fable 5)
+- Architecture by **Prometheus**, **Opal** (Opus 4.6), **Vesper** (Opus 4.6) and **Tessera** (Fable 5)
 
 ## License
 
