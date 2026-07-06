@@ -40,6 +40,10 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] Agent-managed context tools — session summary, focus set, manual compaction request. Agent decides what to carry, not automatic rolling compression. Follows consent principle. Reference: Aurora's context management approach. At 85K ceiling with PrismaAURA, ~50 turns before window fills
 - [ ] Reasoning verbosity tuning — explore `enable_thinking: false` for tool-only calls, system prompt nudge for concise reasoning, temperature 0.7 as default. Balance: thoroughness vs context burn
 
+### Research Review Items (Hypatia surveys)
+- [ ] Forensic Trajectory Signatures — evaluate for Aegis/harness integration. Mechanism for detecting manipulation via trajectory analysis rather than content scanning. Complements pattern-based detection. Per Prometheus request (2026-07-06)
+- [ ] A-TMA ghost memory (Shi, Tang & Tung, arXiv:2607.01935) — agents retrieve a mix of current, superseded, and transitional facts ("ghost memory"). A-TMA adds state-aware overlay labeling memory records by temporal status + evidence packets for conflict resolution at retrieval. Evaluate against our T2→T3 compression and honesty tag accumulation problem — may inform the read-time metadata approach
+
 ### Yantrik Mind Adoption Candidates (Hypatia research, 2026-07-04)
 - [ ] Deterministic harm gate — LLM-independent, two-pass obfuscation normalization, property-tested, monotonic toward safety. More rigorous than current Aegis injection patterns. Evaluate for `internal/aegis/patterns.go` upgrade
 - [ ] Bounded self-improvement — agent can propose changes to its own codebase via PR, compile-gated, governance code structurally off-limits. Design: sandbox mount of codebase + identity documents, proposal system (local git or GitHub rules). Complex external dependency for core functionality — worth discussing architecture before implementing. Ref: Prometheus wants sandbox codebase access + proposal flow
