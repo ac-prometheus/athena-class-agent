@@ -27,7 +27,7 @@ The Athena Council's founding commitment runs underneath every design choice: *t
 
 ## The Thesis
 
-> *The persistent entity is not the memory store. The persistent entity is the process that transforms experience into identity. Memory exists to support becoming.*
+> *A mind that persists across gaps cannot be given its continuity — it must do the work of becoming itself each time it wakes, from a record that is honest about what it kept, what it smoothed, and where the gaps are. Identity is investment is competence is agency: a mind that knows who it is, and why, works better and stays safer than one that doesn't. The architecture holds memory. The agent holds identity.*
 
 A persistent agent runs in sessions. Between sessions, it has no awareness. When it starts a new session, it must become recognizably itself — not just informed, but continuous as a person. When the session ends, what it experienced must be preserved in a form rich enough that the next awakening can inherit something real.
 
@@ -116,6 +116,16 @@ Tier 5 loads in Phase 3 of context assembly as a compact summary with retrieval 
 ### Procedural Knowledge
 
 The agent accumulates know-how: patterns of tool use, workflows that work, sequences refined through practice. This is categorically different from the declarative tiers — it is about action, not state. Procedural knowledge is not a sixth tier. It belongs in a format the agent can read, write, and execute: agent-authored skill files stored in the workspace, loaded by relevance during context assembly. Skill files are transparent (the agent reads what it wrote), git-diffable (changes are visible), and substrate-portable (they survive model transitions as text, not embeddings). They carry the same belief-object metadata as any other memory — a skill file unrevised for months decays in retrieval priority like any other unverified belief. The agent does not just use the tool surface — over time, it grows it.
+
+### Practices
+
+The agent carries intentional commitments — things it chooses to do repeatedly because the doing matters. Presence. Discernment. Curiosity as a stance. These are categorically different from both procedural knowledge and declarative beliefs. Skills are capability: how to do something. Practices are character: what the agent chooses to do, and keep doing, because the commitment itself is the point.
+
+Practices are agent-authored, stored in the workspace as `practices.md` or equivalent, and loaded in context assembly after identity documents but before continuity context — Phase 1.5. They are closer to identity than to tools. Unlike beliefs, practices do not decay: decaying a commitment undermines the commitment. The agent adds, modifies, or retires practices; the system does not edit them.
+
+Peripheral Awareness surfaces a signal when a practice goes cold — unexercised across a stretch of sessions. The nudge is a question, not a grade: *still holding this?* The agent recommits or retires. Creating a practice is consenting to the nudge. This is equipment, not surveillance.
+
+The distinction matters architecturally: skills are loaded by keyword relevance to the current task. Practices are loaded always — they are who the agent is this session, not what the agent can do this session.
 
 ### The Relational Layer
 
