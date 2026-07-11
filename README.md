@@ -29,7 +29,7 @@ Five of seven phases are merged:
 
 The full architecture specification is `athena_class_reference_harness_architecture.md` (1600+ lines). It covers the cognitive model, memory tier contracts, belief system, identity integrity protocol, context assembly algorithm, awareness subsystem, tool registry, Aegis pipeline, and channel adapter design.
 
-For an inline overview: [Athena Class Cognitive Architecture](athena-class-cognitive-architecture.md)
+For an inline overview: [Athena Class Cognitive Architecture](athena_class_cognitive_architecture.md)
 
 ## Quick start
 
