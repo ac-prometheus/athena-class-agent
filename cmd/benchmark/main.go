@@ -25,7 +25,7 @@ func run() error {
 		endpoint       = flag.String("endpoint", "http://localhost:8001/v1", "OpenAI-compatible base URL")
 		model          = flag.String("model", "qwen-3.6-27b", "model name for API requests")
 		temperature    = flag.Float64("temperature", 1.0, "generation temperature")
-		maxTokens      = flag.Int("max-tokens", 500, "per-turn max tokens")
+		maxTokens      = flag.Int("max-tokens", 0, "per-turn max tokens (0 = unlimited)")
 		output         = flag.String("output", "", "output JSON file path (required)")
 		judge          = flag.String("judge", "", "judge endpoint for automated scoring (optional)")
 		judgeModel     = flag.String("judge-model", "claude-sonnet-4-20250514", "model for LLM-as-judge")

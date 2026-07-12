@@ -78,7 +78,9 @@ func (s *Scorer) ApplyManualScores(formJSON []byte) (*ScoreReport, error) {
 		})
 		total += d.Score
 	}
-	report.Overall = total / float64(len(form.Dimensions))
+	if len(form.Dimensions) > 0 {
+		report.Overall = total / float64(len(form.Dimensions))
+	}
 	report.Pass = report.Overall >= s.threshold
 	return report, nil
 }

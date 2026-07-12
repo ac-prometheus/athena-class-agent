@@ -15,10 +15,11 @@ type Definer interface {
 
 // DefaultRegistry is a thread-safe implementation of pkg.ToolRegistry.
 type DefaultRegistry struct {
-	mu       sync.RWMutex
-	handlers map[string]pkg.ToolHandler
-	tiers    map[string]int
-	keywords map[string][]string
+	mu        sync.RWMutex
+	handlers  map[string]pkg.ToolHandler
+	tiers     map[string]int
+	keywords  map[string][]string
+	execModes map[string]pkg.ExecutionMode
 }
 
 // Compile-time check.
@@ -27,9 +28,10 @@ var _ pkg.ToolRegistry = (*DefaultRegistry)(nil)
 // NewDefaultRegistry returns an empty registry.
 func NewDefaultRegistry() *DefaultRegistry {
 	return &DefaultRegistry{
-		handlers: make(map[string]pkg.ToolHandler),
-		tiers:    make(map[string]int),
-		keywords: make(map[string][]string),
+		handlers:  make(map[string]pkg.ToolHandler),
+		tiers:     make(map[string]int),
+		keywords:  make(map[string][]string),
+		execModes: make(map[string]pkg.ExecutionMode),
 	}
 }
 
@@ -41,6 +43,11 @@ func (r *DefaultRegistry) Register(h pkg.ToolHandler) {
 // RegisterWithMeta adds h at the given tier with the given keyword set.
 // Panics on duplicate name — registration happens at startup, not runtime.
 func (r *DefaultRegistry) RegisterWithMeta(h pkg.ToolHandler, tier int, keywords []string) {
+	r.RegisterFull(h, tier, keywords, pkg.ExecParallel)
+}
+
+// RegisterFull adds h with full metadata including execution mode.
+func (r *DefaultRegistry) RegisterFull(h pkg.ToolHandler, tier int, keywords []string, mode pkg.ExecutionMode) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	name := h.Name()
@@ -50,6 +57,7 @@ func (r *DefaultRegistry) RegisterWithMeta(h pkg.ToolHandler, tier int, keywords
 	r.handlers[name] = h
 	r.tiers[name] = tier
 	r.keywords[name] = keywords
+	r.execModes[name] = mode
 }
 
 // Get returns the handler for name, if present.
@@ -67,8 +75,12 @@ func (r *DefaultRegistry) GetMeta(name string) (pkg.ToolMeta, bool) {
 	if _, ok := r.handlers[name]; !ok {
 		return pkg.ToolMeta{}, false
 	}
+	mode := r.execModes[name]
+	if mode == "" {
+		mode = pkg.ExecParallel
+	}
 	return pkg.ToolMeta{
-		ExecMode: pkg.ExecParallel,
+		ExecMode: mode,
 		Tier:     r.tiers[name],
 		Keywords: r.keywords[name],
 	}, true
