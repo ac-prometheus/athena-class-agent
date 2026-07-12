@@ -28,8 +28,11 @@ const (
 
 // Message is a single conversation turn.
 type Message struct {
-	Role    string // "system", "user", "assistant"
-	Content string
+	Role       string         // "system", "user", "assistant", "tool"
+	Content    string         // text for user/system; output for tool
+	Blocks     []ContentBlock // structured output for assistant turns
+	ToolCallID string         // for role="tool": which call this responds to
+	IsError    bool           // for role="tool": whether result is an error
 }
 
 // CompletionRequest is the input to an LLM completion call.
@@ -107,6 +110,7 @@ type CompletionResponse struct {
 
 	// Structured output — populated by the MOP SSE parser.
 	Blocks           []ContentBlock
+	FinishReason     string        // "stop", "tool_calls", "length"
 
 	PromptTokens     int
 	CompletionTokens int

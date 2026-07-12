@@ -182,6 +182,7 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		compToks          int
 		ttft              time.Duration
 		gotFirst          bool
+		finishReason      string
 	)
 
 	scanner := bufio.NewScanner(r)
@@ -216,6 +217,10 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 			continue
 		}
 		choice := chunk.Choices[0]
+
+		if choice.FinishReason != nil && *choice.FinishReason != "" {
+			finishReason = *choice.FinishReason
+		}
 
 		// Thinking: check provider-native fields in priority order.
 		reasoningDelta := choice.Delta.Reasoning
@@ -330,6 +335,7 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		ThinkingTrace:    thinking,
 		ToolCalls:        toolCalls,
 		Blocks:           blocks,
+		FinishReason:     finishReason,
 		PromptTokens:     promptToks,
 		CompletionTokens: compToks,
 		ThinkingTokens:   len(thinking) / 4,
