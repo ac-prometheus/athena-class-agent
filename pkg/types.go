@@ -33,10 +33,11 @@ type Message struct {
 
 // CompletionRequest is the input to an LLM completion call.
 type CompletionRequest struct {
-	System    string
-	Messages  []Message
-	Tools     []ToolDef
-	MaxTokens int
+	System      string
+	Messages    []Message
+	Tools       []ToolDef
+	MaxTokens   int
+	Temperature *float64 // nil = endpoint default
 }
 
 // ToolDef describes a tool available to the agent.

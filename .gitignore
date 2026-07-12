@@ -48,6 +48,9 @@ config/channels.json
 /bin/
 /dist/
 
+# Benchmark results
+/results/
+
 # Editor/IDE
 # .idea/
 # .vscode/

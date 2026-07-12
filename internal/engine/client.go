@@ -74,6 +74,9 @@ func (c *OpenAICompatClient) Complete(ctx context.Context, req pkg.CompletionReq
 	if req.MaxTokens > 0 {
 		body["max_tokens"] = req.MaxTokens
 	}
+	if req.Temperature != nil {
+		body["temperature"] = *req.Temperature
+	}
 	if c.thinkingMode {
 		body["extra_body"] = map[string]any{"enable_thinking": true}
 	}
