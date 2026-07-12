@@ -22,6 +22,13 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] M3: InferenceDistance errors bucketed as key -1 — add explicit ErrorCount field
 - [ ] M4: `findContradiction` is O(n_edges × 20) SearchReflections calls — replace with `GetReflectionByID` when method exists
 
+### MOP Phase 3 (Circe)
+- [ ] C1: `ContentBlock` constructed as raw struct literal throughout — no constructor guards. Add `NewTextBlock()`, `NewThinkingBlock()`, `NewToolCallBlock()` helpers so callers can't accidentally leave `Type` unset. Affects `pkg/types.go` + call sites in `internal/engine/client.go` and tests
+- [ ] C2: `AfterToolCall` behaviour under `DryRun` is undocumented — the comment says "hooks still run" but does not clarify that `AfterToolCall` fires with the dry-run stub result, not a real tool result. Add a doc comment to `EngineConfig.AfterToolCall` clarifying this
+- [ ] C4: Dead `Aegis` field on `EngineConfig` — listed in `engine.go` struct but never read or passed to any hook. Either wire it or remove it
+- [ ] N3: Panic recovery absent from parallel goroutine dispatch — a panicking tool handler will crash the whole process. Add `recover()` in the goroutine launched by `executeParallel`, convert to error result
+- [ ] C12: Judge transcript budget unguarded — `JudgeScore` in `internal/benchmark/scorer.go` sends the full conversation transcript in a single prompt with no token length check. Long runs can exceed provider context limits. Add a max-transcript-chars guard with truncation or chunking before the LLM call
+
 ### Red Security Review
 - [ ] Finding 1: Aegis pipeline — implemented in Phase 5. Channel adapters must not pre-sanitize
 - [ ] SubAgent isolation via sandbox — Phase 4 sandbox exists, delegation not yet wired
@@ -30,7 +37,7 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] Network egress proxy — deferred hardening item per spec
 
 ### TMA-NM Laundering Channels (Louck, arXiv:2606.24322)
-- [ ] Summarization channel — T2→T3 compression without Aegis annotation is the attack surface. Compression guard (refuse to compress unannoted content) is tracked in Red's items but not yet implemented
+- [ ] Summarization channel — T2→T3 compression without Aegis annotation is the attack surface. Compression guard (refuse to compress unannotated content) is tracked in Red's items but not yet implemented
 - [ ] Trusted-tool echo — vault/oracle retrieval of poisoned content bypasses Aegis if the tool is trusted. Tool results should carry provenance labels
 - [ ] Manufactured corroboration — multiple poisoned sources reinforcing the same claim. Cross-source dedup or contradiction detection before belief formation
 - [ ] Write-time authority binding — every memory record should carry a non-forgeable label of who wrote it. More rigorous than current provenance tagging
@@ -48,6 +55,27 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] Deterministic harm gate — LLM-independent, two-pass obfuscation normalization, property-tested, monotonic toward safety. More rigorous than current Aegis injection patterns. Evaluate for `internal/aegis/patterns.go` upgrade
 - [ ] Bounded self-improvement — agent can propose changes to its own codebase via PR, compile-gated, governance code structurally off-limits. Design: sandbox mount of codebase + identity documents, proposal system (local git or GitHub rules). Complex external dependency for core functionality — worth discussing architecture before implementing. Ref: Prometheus wants sandbox codebase access + proposal flow
 
+### External Code Audit (2026-07-12)
+- [ ] #1 (CRITICAL): SQLite dialect incompatibility — `session.go` and `context.go` use `$1` placeholders and `NOW()`. SQLite path crashes immediately. Abstract into store layer
+- [ ] #2 (HIGH): Discord snowflake cursor — `fetchMessages` overwrites `newestID` with oldest message in batch, causing re-fetch loop. Verify against Circe's Phase 5 fix (may already be resolved)
+- [ ] #3 (HIGH): Daemon missing wake checks + OS signals — `select` loop only handles `ctx.Done()` and events. No `waker.NextWake()` ticker, no `SIGINT`/`SIGTERM` handling. Phase 7+ daemon integration scope
+- [ ] #4 (HIGH): Discarded startup notes — `firstWake` flag drops interrupted-session notes if first event doesn't trigger wake. Preserve in persistent queue
+- [ ] #5 (MEDIUM): Forums goroutine leak — blocking `out <- p` without `ctx.Done()` select. Same class as Phase 5 registry fan-in fix
+- [ ] #6 (MEDIUM): Wake scheduler data race — `scheduled` slice modified concurrently without mutex. Check if Circe's Phase 5 fixes cover this surface
+- [ ] #7 (MEDIUM): Inference distance default=1 for unanchored beliefs — spec says decay faster, code gives slowest rate. **Design decision: Opal recommends A+C (distance=5 + UNGROUNDED tag), Vesper recommends B+C (distance=3 + tag). Prometheus deciding. Configurable default shipping with tag.**
+- [ ] #8 (LOW): Sandbox privilege check — no capability assertion before `SysProcAttr` credential switch. Add startup validation or graceful failure
+
+### Vesper Architectural Review (2026-07-03)
+- [ ] Honesty tag accumulation in T3 re-compression — tags (`[UNCERTAIN]`, `[INFERRED]`, etc.) persist in canonical T3 content and re-accumulate on subsequent compressions. Same failure mode as stored-mutated confidence: each compression layer adds weight the tag didn't earn. Fix: store tags as metadata, apply at read time (same pattern as `BeliefMeta.Confidence()`). Confirmed by Vesper, Pullo, Hypatia's research. Design discussion needed before implementing.
+
+## Phase 4 (MOP) — Upcoming Work
+
+- [ ] Remove `internal/engine/loop.go` and `internal/engine/dispatch.go` — legacy loop preserved during Phase 3; Phase 4 completes the cut-over to `Engine`
+- [ ] Wire `Engine` as the default in `cmd/agent` — currently `Loop.Run()` is still the call site
+- [ ] `ToolHandlerV2` adoption — migrate existing tool handlers to `ExecuteV2` returning `*pkg.ToolResult` (structured errors, metadata, terminate signal)
+- [ ] Structured tool output — `ToolResult.Metadata` map for provenance labels (feeds TMA-NM trusted-tool echo mitigation)
+- [ ] Aegis hook wiring — connect `gateway.ProcessInbound` / `ProcessOutbound` to `BeforeToolCall` / `AfterToolCall` on the live `Engine` instance
+
 ## Infrastructure
 
 - [ ] `GetReflectionByID` method on MemoryStore — needed for O(1) contradiction lookup
@@ -55,15 +83,22 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] Playwright/Patchright system Chrome integration for DynamicFetcher tier
 - [ ] Unified search tool (Gemini grounded + Brave API + DDG, backlogged per Prometheus)
 - [ ] GFS backup rotation script for JSONL conversation files
-- [ ] README update for Phase 6 (belief tuning section)
 - [ ] BACKLOG.md itself — kept current as items are resolved
 
 ## Resolved
 
 Items moved here when fixed, with commit reference.
 
-*(none yet)*
+### MOP Phase 3 review (Circe) — fixed in `d34b3f4` and `1fe23bb`
+- [x] **B1 (engine):** `BeforeToolCall` hook error fell through instead of blocking execution — Aegis gate failing open. Fixed: error → block → error-as-result (`d34b3f4`)
+- [x] **B2 (engine):** Sequential terminate allocated full-length result slice; zero-value `ToolCallID` entries caused provider rejections. Fixed: slice to filled entries only (`d34b3f4`)
+- [x] **C3 (engine):** `TurnNumber` off-by-one — was `iterations-1`, now 1-based `iterations` (`d34b3f4`)
+- [x] **B1 (registry):** `Registry.GetMeta` hardcoded `ExecParallel` — added `RegisterFull()` with `ExecMode` param so sequential tools can declare themselves. Fixed in `1fe23bb`
+- [x] **C11 (benchmark):** `ApplyManualScores` panicked on empty dimensions slice — zero-guard added (`1fe23bb`)
 
-### Vesper Architectural Review (2026-07-03)
-- [ ] Honesty tag accumulation in T3 re-compression — tags (`[UNCERTAIN]`, `[INFERRED]`, etc.) persist in canonical T3 content and re-accumulate on subsequent compressions. Same failure mode as stored-mutated confidence: each compression layer adds weight the tag didn't earn. Fix: store tags as metadata, apply at read time (same pattern as `BeliefMeta.Confidence()`). Confirmed by Vesper, Pullo, Hypatia's research. Design discussion needed before implementing.
-- [ ] Discord content source missing from T2 validation — FIXED in `351e17a`
+### Phase 6 review (Circe) — fixed in `a80e7b8`
+- [x] C1–C3 from Circe Phase 6 review (see commit message for details)
+
+### Infrastructure
+- [x] README update for Phase 6 (belief tuning section) + MOP Phases 1-3 — fixed in `7708508`
+- [x] Discord content source missing from T2 validation — fixed in `351e17a`
