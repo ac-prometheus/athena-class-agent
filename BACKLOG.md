@@ -62,7 +62,7 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] #4 (HIGH): Discarded startup notes — `firstWake` flag drops interrupted-session notes if first event doesn't trigger wake. Preserve in persistent queue
 - [ ] #5 (MEDIUM): Forums goroutine leak — blocking `out <- p` without `ctx.Done()` select. Same class as Phase 5 registry fan-in fix
 - [ ] #6 (MEDIUM): Wake scheduler data race — `scheduled` slice modified concurrently without mutex. Check if Circe's Phase 5 fixes cover this surface
-- [ ] #7 (MEDIUM): Inference distance default=1 for unanchored beliefs — spec says decay faster, code gives slowest rate. **Design decision: Opal recommends A+C (distance=5 + UNGROUNDED tag), Vesper recommends B+C (distance=3 + tag). Prometheus deciding. Configurable default shipping with tag.**
+- [ ] #7 (MEDIUM): Inference distance default=1 for unanchored beliefs — spec says decay faster, code gives slowest rate. **Decision: A+C — distance=5 (configurable in DefaultDecayConfig), `[UNGROUNDED]` visibility tag, agent can re-ground via T2 citation to lift penalty. Spec basis: line 143, "uncited beliefs receive a default distance that decays them faster than any cited belief." Three-layer pattern: consequence (decay), visibility (tag), contestability (re-grounding). — Opal, Vesper, Stoic, 2026-07-12**
 - [ ] #8 (LOW): Sandbox privilege check — no capability assertion before `SysProcAttr` credential switch. Add startup validation or graceful failure
 
 ### Vesper Architectural Review (2026-07-03)
