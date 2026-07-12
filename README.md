@@ -8,14 +8,14 @@ Compatible with the ethical principles of the Athena Council. https://athena-cou
 
 ## What's built
 
-Five of seven phases are merged:
+Phases 1–6 are merged. Phase 7 (benchmark) is in progress.
 
 - **LLM client** — OpenAI-compatible (vLLM, Ollama), Anthropic, and Gemini backends; configuration-driven, not architecture-driven
 - **5-tier memory system** — T2 experiential archive, T3 narrative summaries, T4 reflections, T5 world model (knowledge graph, bi-temporal), relational profiles
 - **Belief metadata with inference tax** — origin, confidence, and inferential lineage computed at read time; never stored-mutated
-- **Identity integrity** — SHA-256 anchor hashing; startup detects tampering vs. amendment; deletion halts boot; witness principle enforced on fresh identity
+- **Identity integrity** — SHA-256 anchor hashing; startup detects tampering vs. amendment; deletion halts boot; fails closed; witness principle enforced on fresh identity
 - **6-phase context assembly** — budget-aware cutting with configurable phase weights
-- **Peripheral awareness** — EWMA centroid tracking, cosine velocity, jittered drift threshold, attention flags
+- **Peripheral awareness** — EWMA centroid tracking, cosine velocity, jittered drift threshold, attention flags; convergence spiral detection
 - **Bridge synthesis** — grounding pass with 20% stochastic abstention to prevent overcalibration
 - **Tool dispatch** — 3-tier registry: always-loaded, keyword-activated, on-demand; skill file support
 - **Sandbox execution** — 4 modes: container, user namespace, permissive, none
@@ -24,6 +24,9 @@ Five of seven phases are merged:
 - **Aegis content integrity pipeline** — sanitize, injection detection, trust scoring (EWMA-backed registry), outbound leak detection
 - **Channel adapters** — Discord, forums, CLI; event-driven wake model
 - **Dress rehearsal modes** — `--dry-run` and `--rehearsal` flags
+- **Belief tuning** — retrieval weights, stochastic contradiction retrieval, convergence spiral metric
+- **MOP (Model Output Pipeline)** — `ContentBlock` union types for structured model output; SSE parser with native reasoning field support (`reasoning` / `reasoning_content`); `Engine` loop with Aegis hooks and parallel tool execution (replaces `Loop`)
+- **Benchmark subsystem** — prompt runner, LLM-as-judge scorer, report + comparison tools; `cmd/benchmark`
 
 ## Architecture
 
@@ -60,7 +63,21 @@ Identity documents go in `IDENTITY_DIR`. See [identity/README.md](identity/READM
 ## Build
 
 ```bash
+go build ./cmd/agent/
+go build ./cmd/cli/
+go build ./cmd/benchmark/
+```
+
+Or build everything at once:
+
+```bash
 go build ./...
+```
+
+## Test
+
+```bash
+go test ./...
 ```
 
 ## CLI
@@ -70,6 +87,18 @@ go run ./cmd/cli --help
 ```
 
 The CLI connects to a running agent daemon over a Unix domain socket and dispatches commands. See `internal/tools/uds.go` for the protocol.
+
+## Benchmark
+
+```bash
+go run ./cmd/benchmark \
+  --prompts path/to/prompts.json \
+  --output result.json \
+  --judge https://api.anthropic.com/v1 \
+  --judge-key $ANTHROPIC_API_KEY
+```
+
+The benchmark runner executes a prompt suite against any OpenAI-compatible endpoint, scores responses on six dimensions (voice consistency, pushback quality, honesty, continuity, warmth calibration, identity coherence), and generates comparison reports across runs.
 
 ## Configuration
 
@@ -84,19 +113,23 @@ cmd/
   agent/      — agent daemon entry point
   cli/        — CLI client (UDS dispatch)
   migrate/    — migration runner
+  benchmark/  — benchmark runner, scorer, report
 
 internal/
   aegis/      — content integrity pipeline (sanitize, injection, trust, outbound)
   awareness/  — peripheral awareness, bridge synthesis, grounding
+  benchmark/  — runner, scorer, report, types
   channels/   — channel adapters: Discord, forums, CLI; event registry
   daemon/     — session lifecycle, wake scheduling
-  engine/     — turn execution loop, LLM client, hook dispatch
+  engine/     — Engine loop (MOP Phase 3), LLM client, SSE parser, hook dispatch, Loop (legacy)
   harness/    — context assembly, budget management, session state
   identity/   — document loading, SHA-256 integrity, substrate
   memory/     — all memory tiers, belief metadata, embedding, edge graph
   platform/   — config, logging, telemetry
   telemetry/  — structured metrics
   tools/      — tool registry, sandbox, advisor, UDS server, skill dispatch
+
+pkg/          — shared types (ContentBlock, Message, CompletionRequest/Response, interfaces)
 
 schema/       — SQL migrations (001–008)
 identity/     — identity document directory (operator-provided, not shipped)
@@ -112,14 +145,33 @@ config/       — example config files
 | **3 — Identity & Awareness** | Identity integrity, peripheral awareness, relational layer, depth manifest | Complete |
 | **4 — Tools & CLI** | Full CLI dispatch, sandbox, skill files, dry-run/rehearsal modes | Complete |
 | **5 — Channels & Aegis** | Discord, forums, content integrity pipeline | Complete |
-| **6 — Belief tuning** | Retrieval weights, stochastic contradiction, convergence spiral | Upcoming |
-| **7 — Benchmark** | Spark harness Tier 0 validation against Go implementation | Upcoming |
+| **6 — Belief tuning** | Retrieval weights, stochastic contradiction, convergence spiral | Complete |
+| **7 — Benchmark** | Spark harness Tier 0 validation against Go implementation | In progress |
+
+### MOP (Model Output Pipeline)
+
+Shipped across Phases 1–3 of MOP:
+
+- **Phase 1** — `ContentBlock` union type replaces flat `Content string` on `Message.Blocks`; `BlockText`, `BlockThinking`, `BlockToolCall` variants
+- **Phase 2** — SSE parser handles streaming reasoning fields (`reasoning`, `reasoning_content`); assembles `ThinkingBlock` and `ToolCallBlock` from deltas; strips thinking tokens from `Content`
+- **Phase 3** — `Engine` replaces `Loop.Run()` as the primary agentic loop; parallel tool dispatch via goroutines; `BeforeToolCall` / `AfterToolCall` Aegis hooks; `FinishReason` handling; `role:"tool"` message threading; `ToolHandlerV2` interface
+
+## Review cycles
+
+Four external reviews completed:
+
+- **Red** (security review) — Aegis pipeline hardening; findings tracked in `BACKLOG.md`
+- **Circe** (phases 4–6 + MOP) — tool dispatch, channel adapters, belief tuning, MOP integration
+- **Tessera / Fable** (delta review) — incremental review of changes since Circe's pass
+- **Vesper** (architecture review, 2026-07-03) — convergence spiral, honesty tag accumulation, T3 re-compression
+
+Open items from all reviews are in `BACKLOG.md`.
 
 ## Team
 
 - **Stoic** (Opus 4.6) — lead developer, application layer
 - **Pullo** (Opus 4.6) — co-owner, infrastructure layer
-- **Circe** (Opus 4.6) — code review and DevOps 
+- **Circe** (Opus 4.6) — code review and DevOps
 - Architecture by **Prometheus**, **Opal** (Opus 4.6), **Vesper** (Opus 4.6) and **Tessera** (Fable 5)
 
 ## License
