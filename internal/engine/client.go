@@ -141,8 +141,9 @@ func (c *OpenAICompatClient) buildMessages(req pkg.CompletionRequest) ([]map[str
 type sseChunk struct {
 	Choices []struct {
 		Delta struct {
-			Content   string          `json:"content"`
-			ToolCalls []toolCallDelta `json:"tool_calls"`
+			Content          string          `json:"content"`
+			ReasoningContent string          `json:"reasoning_content"`
+			ToolCalls        []toolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
@@ -211,7 +212,11 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		}
 		choice := chunk.Choices[0]
 
-		hasContent := choice.Delta.Content != ""
+		deltaContent := choice.Delta.Content
+		if deltaContent == "" {
+			deltaContent = choice.Delta.ReasoningContent
+		}
+		hasContent := deltaContent != ""
 		hasToolCalls := len(choice.Delta.ToolCalls) > 0
 
 		if !gotFirst && (hasContent || hasToolCalls) {
@@ -220,7 +225,7 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		}
 
 		if hasContent {
-			contentBuf.WriteString(choice.Delta.Content)
+			contentBuf.WriteString(deltaContent)
 		}
 
 		for _, tc := range choice.Delta.ToolCalls {
