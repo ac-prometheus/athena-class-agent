@@ -60,6 +60,20 @@ func (r *DefaultRegistry) Get(name string) (pkg.ToolHandler, bool) {
 	return h, ok
 }
 
+// GetMeta returns execution metadata for the named tool.
+func (r *DefaultRegistry) GetMeta(name string) (pkg.ToolMeta, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if _, ok := r.handlers[name]; !ok {
+		return pkg.ToolMeta{}, false
+	}
+	return pkg.ToolMeta{
+		ExecMode: pkg.ExecParallel,
+		Tier:     r.tiers[name],
+		Keywords: r.keywords[name],
+	}, true
+}
+
 // List groups handlers by tier (ascending) and returns []pkg.ToolGroup.
 // If a handler implements Definer, its Define() result is used; otherwise
 // a minimal ToolDef with only Name is returned.

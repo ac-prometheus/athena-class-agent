@@ -142,6 +142,7 @@ type sseChunk struct {
 	Choices []struct {
 		Delta struct {
 			Content          string          `json:"content"`
+			Reasoning        string          `json:"reasoning"`
 			ReasoningContent string          `json:"reasoning_content"`
 			ToolCalls        []toolCallDelta `json:"tool_calls"`
 		} `json:"delta"`
@@ -169,14 +170,18 @@ type toolCallDelta struct {
 
 // parseStream reads an SSE stream and assembles a CompletionResponse.
 // Handles split lines, empty choices, null content, and [DONE] sentinels.
+// Populates both legacy fields (Content, ThinkingTrace, ToolCalls) and
+// structured Blocks for the MOP migration.
 func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.CompletionResponse, error) {
 	var (
-		contentBuf    strings.Builder
-		toolCallAccum = make(map[int]*pkg.ToolCall)
-		promptToks    int
-		compToks      int
-		ttft          time.Duration
-		gotFirst      bool
+		contentBuf        strings.Builder
+		thinkingBuf       strings.Builder
+		thinkingFieldName string // "reasoning" or "reasoning_content" — first one that fires
+		toolCallAccum     = make(map[int]*pkg.ToolCall)
+		promptToks        int
+		compToks          int
+		ttft              time.Duration
+		gotFirst          bool
 	)
 
 	scanner := bufio.NewScanner(r)
@@ -212,20 +217,33 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		}
 		choice := chunk.Choices[0]
 
-		deltaContent := choice.Delta.Content
-		if deltaContent == "" {
-			deltaContent = choice.Delta.ReasoningContent
+		// Thinking: check provider-native fields in priority order.
+		reasoningDelta := choice.Delta.Reasoning
+		reasoningSource := "reasoning"
+		if reasoningDelta == "" {
+			reasoningDelta = choice.Delta.ReasoningContent
+			reasoningSource = "reasoning_content"
 		}
-		hasContent := deltaContent != ""
+
+		contentDelta := choice.Delta.Content
+		hasThinking := reasoningDelta != ""
+		hasContent := contentDelta != ""
 		hasToolCalls := len(choice.Delta.ToolCalls) > 0
 
-		if !gotFirst && (hasContent || hasToolCalls) {
+		if !gotFirst && (hasThinking || hasContent || hasToolCalls) {
 			ttft = time.Since(start)
 			gotFirst = true
 		}
 
+		if hasThinking {
+			thinkingBuf.WriteString(reasoningDelta)
+			if thinkingFieldName == "" {
+				thinkingFieldName = reasoningSource
+			}
+		}
+
 		if hasContent {
-			contentBuf.WriteString(deltaContent)
+			contentBuf.WriteString(contentDelta)
 		}
 
 		for _, tc := range choice.Delta.ToolCalls {
@@ -249,15 +267,37 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 	}
 
 	total := time.Since(start)
-	raw := contentBuf.String()
-	content, thinking := stripThinkingTokens(raw)
 
-	var tokS float64
-	if total.Seconds() > 0 && compToks > 0 {
-		tokS = float64(compToks) / total.Seconds()
+	// --- Build content blocks and legacy fields ---
+	rawContent := contentBuf.String()
+	rawThinking := thinkingBuf.String()
+
+	// Fallback: tag-stripping for models that embed thinking in content.
+	// Provider-native fields take priority — only strip tags if no native thinking arrived.
+	if rawThinking == "" && c.thinkingMode {
+		cleaned, stripped := stripThinkingTokens(rawContent)
+		if stripped != "" {
+			rawContent = cleaned
+			rawThinking = stripped
+			thinkingFieldName = "" // tag-stripped, no native field
+		}
 	}
 
-	thinkingToks := len(thinking) / 4
+	var blocks []pkg.ContentBlock
+
+	if rawThinking != "" {
+		blocks = append(blocks, pkg.ContentBlock{
+			Type:      pkg.BlockThinking,
+			Thinking:  strings.TrimSpace(rawThinking),
+			FieldName: thinkingFieldName,
+		})
+	}
+	if strings.TrimSpace(rawContent) != "" {
+		blocks = append(blocks, pkg.ContentBlock{
+			Type: pkg.BlockText,
+			Text: strings.TrimSpace(rawContent),
+		})
+	}
 
 	var toolCalls []pkg.ToolCall
 	if len(toolCallAccum) > 0 {
@@ -267,17 +307,32 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		}
 		sort.Ints(indices)
 		for _, idx := range indices {
-			toolCalls = append(toolCalls, *toolCallAccum[idx])
+			tc := toolCallAccum[idx]
+			toolCalls = append(toolCalls, *tc)
+			blocks = append(blocks, pkg.ContentBlock{
+				Type:     pkg.BlockToolCall,
+				ToolCall: tc,
+			})
 		}
 	}
+
+	var tokS float64
+	if total.Seconds() > 0 && compToks > 0 {
+		tokS = float64(compToks) / total.Seconds()
+	}
+
+	// Legacy fields: Content uses tag-stripped content, ThinkingTrace uses raw thinking.
+	content := strings.TrimSpace(rawContent)
+	thinking := strings.TrimSpace(rawThinking)
 
 	return &pkg.CompletionResponse{
 		Content:          content,
 		ThinkingTrace:    thinking,
 		ToolCalls:        toolCalls,
+		Blocks:           blocks,
 		PromptTokens:     promptToks,
 		CompletionTokens: compToks,
-		ThinkingTokens:   thinkingToks,
+		ThinkingTokens:   len(thinking) / 4,
 		TTFT:             ttft,
 		TotalLatency:     total,
 		RawTokS:          tokS,

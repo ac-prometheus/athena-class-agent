@@ -258,6 +258,13 @@ type ToolHandler interface {
 	Execute(ctx context.Context, args map[string]any) (string, error)
 }
 
+// ToolHandlerV2 is the MOP-era tool interface returning structured ToolResult.
+// The engine loop checks for V2 first, falls back to V1.
+type ToolHandlerV2 interface {
+	ToolHandler
+	ExecuteV2(ctx context.Context, args map[string]any) (*ToolResult, error)
+}
+
 // ToolGroup is a logical grouping of tools sharing a tier and keyword set.
 type ToolGroup struct {
 	Name     string
@@ -270,6 +277,7 @@ type ToolGroup struct {
 type ToolRegistry interface {
 	Register(h ToolHandler)
 	Get(name string) (ToolHandler, bool)
+	GetMeta(name string) (ToolMeta, bool)
 	List() []ToolGroup
 }
 

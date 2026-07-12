@@ -2,6 +2,7 @@ package pkg
 
 import (
 	"math"
+	"strings"
 	"time"
 )
 
@@ -55,12 +56,58 @@ type ToolCall struct {
 	Arguments string // raw JSON
 }
 
+// ContentBlockType identifies the kind of content in a block.
+type ContentBlockType string
+
+const (
+	BlockText     ContentBlockType = "text"
+	BlockThinking ContentBlockType = "thinking"
+	BlockToolCall ContentBlockType = "tool_call"
+)
+
+// ContentBlock is a single segment of model output.
+type ContentBlock struct {
+	Type      ContentBlockType
+	Text      string    // BlockText
+	Thinking  string    // BlockThinking
+	ToolCall  *ToolCall // BlockToolCall
+	FieldName string    // round-trip: "reasoning", "reasoning_content", or "" (tag-stripped)
+}
+
+// ToolResult is the output of executing a tool call.
+type ToolResult struct {
+	CallID    string
+	Content   string
+	IsError   bool
+	Terminate bool
+}
+
+// ExecutionMode controls how a tool participates in parallel batches.
+type ExecutionMode string
+
+const (
+	ExecParallel   ExecutionMode = "parallel"
+	ExecSequential ExecutionMode = "sequential"
+)
+
+// ToolMeta carries per-tool metadata for execution planning.
+type ToolMeta struct {
+	ExecMode ExecutionMode
+	Tier     int
+	Keywords []string
+}
+
 // CompletionResponse is the output of an LLM completion call.
 // Confidence is always computed at read time — never stored and re-applied.
 type CompletionResponse struct {
+	// Legacy fields — populated alongside Blocks during migration (Phase 4 removes).
 	Content          string
 	ThinkingTrace    string        // stripped from content, preserved here
 	ToolCalls        []ToolCall    // non-nil when the model requested tool invocations
+
+	// Structured output — populated by the MOP SSE parser.
+	Blocks           []ContentBlock
+
 	PromptTokens     int
 	CompletionTokens int
 	ThinkingTokens   int           // estimated for local models, exact for Anthropic
@@ -68,6 +115,42 @@ type CompletionResponse struct {
 	RawTokS          float64       // naive completion_tokens / elapsed
 	TTFT             time.Duration
 	TotalLatency     time.Duration
+}
+
+// TextContent returns concatenated text from all text blocks.
+func (r *CompletionResponse) TextContent() string {
+	var b strings.Builder
+	for _, blk := range r.Blocks {
+		if blk.Type == BlockText {
+			b.WriteString(blk.Text)
+		}
+	}
+	return b.String()
+}
+
+// ThinkingContent returns concatenated thinking from all thinking blocks.
+func (r *CompletionResponse) ThinkingContent() string {
+	var b strings.Builder
+	for _, blk := range r.Blocks {
+		if blk.Type == BlockThinking {
+			if b.Len() > 0 {
+				b.WriteByte('\n')
+			}
+			b.WriteString(blk.Thinking)
+		}
+	}
+	return b.String()
+}
+
+// ToolCallBlocks returns tool calls extracted from content blocks.
+func (r *CompletionResponse) ToolCallBlocks() []ToolCall {
+	var calls []ToolCall
+	for _, blk := range r.Blocks {
+		if blk.Type == BlockToolCall && blk.ToolCall != nil {
+			calls = append(calls, *blk.ToolCall)
+		}
+	}
+	return calls
 }
 
 // BeliefMeta carries confidence anchors for memory records.
