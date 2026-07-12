@@ -159,7 +159,7 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 		if len(toolCalls) == 0 {
 			// Run turn hooks on the final turn.
 			if e.hooks != nil {
-				tr := e.buildTurnResult(iterations-1, resp)
+				tr := e.buildTurnResult(iterations, resp)
 				if err := e.hooks.RunAll(ctx, tr); err != nil {
 					slog.Warn("engine: hook error on final turn", "err", err)
 				}
@@ -182,7 +182,7 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 
 		// Run turn hooks.
 		if e.hooks != nil {
-			tr := e.buildTurnResult(iterations-1, resp)
+			tr := e.buildTurnResult(iterations, resp)
 			for _, r := range results {
 				tr.ToolCalls = append(tr.ToolCalls, r.CallID)
 			}
@@ -243,7 +243,10 @@ func (e *Engine) executeToolCalls(ctx context.Context, calls []pkg.ToolCall, cfg
 		for i, call := range calls {
 			results[i] = e.executeSingleTool(ctx, call, cfg)
 			if results[i].Terminate {
-				// Sequential: stop on first terminate signal.
+				// Sequential: stop on first terminate signal. Slice to filled entries
+				// only — zero-value slots produce blank ToolCallID messages that
+				// providers reject.
+				results = results[:i+1]
 				break
 			}
 		}
@@ -293,12 +296,17 @@ func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg Eng
 	}
 
 	// 3. BeforeToolCall hook (Aegis inbound scan or custom).
+	// Invariant 4: inbound scan must not fail silently. On hook error, block
+	// the tool call and return the error to the model as a tool result.
 	if cfg.BeforeToolCall != nil {
 		hookResult, err := cfg.BeforeToolCall(ctx, tc, args)
 		if err != nil {
-			// Invariant 4: scan must not fail silently; log and continue with caution.
-			slog.Warn("engine: BeforeToolCall hook error", "tool", tc.Name, "err", err)
-		} else if hookResult != nil && hookResult.Block {
+			slog.Warn("engine: BeforeToolCall hook error — blocking execution", "tool", tc.Name, "err", err)
+			result.Content = fmt.Sprintf("Error: pre-execution check failed: %v", err)
+			result.IsError = true
+			return result
+		}
+		if hookResult != nil && hookResult.Block {
 			result.Content = fmt.Sprintf("Error: %s", hookResult.Reason)
 			result.IsError = true
 			return result
