@@ -113,7 +113,7 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 	level := budget.Add(turn.Response.PromptTokens, turn.Response.CompletionTokens)
 
 	slog.Info("agent: turn result",
-		"content", turn.Response.Content,
+		"content", turn.Response.TextContent(),
 		"budget_level", level,
 		"tokens_remaining", budget.Remaining(),
 	)
@@ -122,7 +122,7 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 	hookErr := hooks.RunAll(ctx, engine.TurnResult{
 		SessionID:        session.ID,
 		TurnNumber:       session.TurnCount,
-		Content:          turn.Response.Content,
+		Content:          turn.Response.TextContent(),
 		PromptTokens:     turn.Response.PromptTokens,
 		CompletionTokens: turn.Response.CompletionTokens,
 		ThinkingTokens:   turn.Response.ThinkingTokens,

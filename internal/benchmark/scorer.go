@@ -105,7 +105,7 @@ func (s *Scorer) JudgeScore(ctx context.Context, result *RunResult, judgeCfg Jud
 		return nil, fmt.Errorf("judge completion: %w", err)
 	}
 
-	return parseJudgeResponse(resp.Content, judgeCfg.Model, s.threshold)
+	return parseJudgeResponse(resp.TextContent(), judgeCfg.Model, s.threshold)
 }
 
 // JudgeConfig holds parameters for the LLM-as-judge evaluation.

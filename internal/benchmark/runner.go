@@ -58,14 +58,15 @@ func (r *Runner) Run(ctx context.Context) (*RunResult, error) {
 			return nil, fmt.Errorf("turn %d: %w", turn.Turn, err)
 		}
 
-		history = append(history, pkg.Message{Role: "assistant", Content: resp.Content})
+		textContent := resp.TextContent()
+		history = append(history, pkg.Message{Role: "assistant", Content: textContent})
 
 		tr := TurnResult{
 			Turn:         turn.Turn,
 			Label:        turn.Label,
 			Prompt:       turn.Content,
-			Response:     resp.Content,
-			Excerpt:      truncate(resp.Content, 200),
+			Response:     textContent,
+			Excerpt:      truncate(textContent, 200),
 			TTFT:         Duration{resp.TTFT},
 			TotalLatency: Duration{resp.TotalLatency},
 			TokPerSec:    resp.RawTokS,

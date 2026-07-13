@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 
@@ -93,31 +92,34 @@ func (l *Loop) Run(ctx context.Context, systemPrompt string, budget int) (*RunRe
 			return nil, fmt.Errorf("engine: LLM completion turn %d: %w", turnIndex, err)
 		}
 
+		toolCalls := resp.ToolCallBlocks()
+		textContent := resp.TextContent()
+
 		slog.Info("engine: turn complete",
 			"turn", turnIndex,
 			"prompt_tokens", resp.PromptTokens,
 			"completion_tokens", resp.CompletionTokens,
-			"tool_calls", len(resp.ToolCalls),
+			"tool_calls", len(toolCalls),
 			"ttft_ms", resp.TTFT.Milliseconds(),
 			"total_ms", resp.TotalLatency.Milliseconds(),
 		)
 
 		turnResult := TurnResult{
 			TurnNumber:       turnIndex,
-			Content:          resp.Content,
+			Content:          textContent,
 			PromptTokens:     resp.PromptTokens,
 			CompletionTokens: resp.CompletionTokens,
 			ThinkingTokens:   resp.ThinkingTokens,
 			TTFT:             resp.TTFT,
 			TotalDuration:    resp.TotalLatency,
 		}
-		for _, tc := range resp.ToolCalls {
+		for _, tc := range toolCalls {
 			turnResult.ToolCalls = append(turnResult.ToolCalls, tc.Name)
 		}
 
 		// No tool calls → the model is done; run hooks and return.
-		if len(resp.ToolCalls) == 0 {
-			messages = append(messages, pkg.Message{Role: "assistant", Content: resp.Content})
+		if len(toolCalls) == 0 {
+			messages = append(messages, pkg.Message{Role: "assistant", Content: textContent})
 
 			if l.hooks != nil {
 				if err := l.hooks.RunAll(ctx, turnResult); err != nil {
@@ -127,16 +129,16 @@ func (l *Loop) Run(ctx context.Context, systemPrompt string, budget int) (*RunRe
 
 			return &RunResult{
 				Messages:      messages,
-				FinalResponse: resp.Content,
+				FinalResponse: textContent,
 				TurnsUsed:     turnIndex + 1,
 			}, nil
 		}
 
 		// Append assistant turn to conversation history.
-		messages = append(messages, pkg.Message{Role: "assistant", Content: resp.Content})
+		messages = append(messages, pkg.Message{Role: "assistant", Content: textContent})
 
 		// Execute each tool call and inject results back into the conversation.
-		for _, call := range resp.ToolCalls {
+		for _, call := range toolCalls {
 			result, dispErr := DispatchToolCall(ctx, l.registry, call, l.cfg.DryRun)
 			if dispErr != nil {
 				slog.Warn("engine: tool dispatch error",
@@ -190,20 +192,3 @@ func (l *Loop) RunOneTurn(ctx context.Context, req pkg.CompletionRequest) (*Turn
 	}, nil
 }
 
-// DispatchTool is the legacy stub signature — real dispatch is via DispatchToolCall in dispatch.go.
-func DispatchTool(_ context.Context, name string, _ map[string]any) (string, error) {
-	return fmt.Sprintf("tool not implemented: %s", name), nil
-}
-
-// toolCallSummary produces a short human-readable summary of tool args for dry-run logging.
-func toolCallSummary(args map[string]any) string {
-	data, err := json.Marshal(args)
-	if err != nil {
-		return "[unserializable args]"
-	}
-	s := string(data)
-	if len(s) > 120 {
-		return s[:120] + "..."
-	}
-	return s
-}

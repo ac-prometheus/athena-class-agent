@@ -103,12 +103,6 @@ type ToolMeta struct {
 // CompletionResponse is the output of an LLM completion call.
 // Confidence is always computed at read time — never stored and re-applied.
 type CompletionResponse struct {
-	// Legacy fields — populated alongside Blocks during migration (Phase 4 removes).
-	Content          string
-	ThinkingTrace    string        // stripped from content, preserved here
-	ToolCalls        []ToolCall    // non-nil when the model requested tool invocations
-
-	// Structured output — populated by the MOP SSE parser.
 	Blocks           []ContentBlock
 	FinishReason     string        // "stop", "tool_calls", "length"
 

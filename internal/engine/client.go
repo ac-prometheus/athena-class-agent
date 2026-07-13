@@ -170,8 +170,6 @@ type toolCallDelta struct {
 
 // parseStream reads an SSE stream and assembles a CompletionResponse.
 // Handles split lines, empty choices, null content, and [DONE] sentinels.
-// Populates both legacy fields (Content, ThinkingTrace, ToolCalls) and
-// structured Blocks for the MOP migration.
 func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.CompletionResponse, error) {
 	var (
 		contentBuf        strings.Builder
@@ -304,7 +302,6 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		})
 	}
 
-	var toolCalls []pkg.ToolCall
 	if len(toolCallAccum) > 0 {
 		indices := make([]int, 0, len(toolCallAccum))
 		for idx := range toolCallAccum {
@@ -313,7 +310,6 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		sort.Ints(indices)
 		for _, idx := range indices {
 			tc := toolCallAccum[idx]
-			toolCalls = append(toolCalls, *tc)
 			blocks = append(blocks, pkg.ContentBlock{
 				Type:     pkg.BlockToolCall,
 				ToolCall: tc,
@@ -326,19 +322,14 @@ func (c *OpenAICompatClient) parseStream(r io.Reader, start time.Time) (*pkg.Com
 		tokS = float64(compToks) / total.Seconds()
 	}
 
-	// Legacy fields: Content uses tag-stripped content, ThinkingTrace uses raw thinking.
-	content := strings.TrimSpace(rawContent)
-	thinking := strings.TrimSpace(rawThinking)
+	thinkingLen := len(strings.TrimSpace(rawThinking))
 
 	return &pkg.CompletionResponse{
-		Content:          content,
-		ThinkingTrace:    thinking,
-		ToolCalls:        toolCalls,
 		Blocks:           blocks,
 		FinishReason:     finishReason,
 		PromptTokens:     promptToks,
 		CompletionTokens: compToks,
-		ThinkingTokens:   len(thinking) / 4,
+		ThinkingTokens:   thinkingLen / 4,
 		TTFT:             ttft,
 		TotalLatency:     total,
 		RawTokS:          tokS,

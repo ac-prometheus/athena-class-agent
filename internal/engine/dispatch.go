@@ -44,3 +44,16 @@ func DispatchToolCall(ctx context.Context, registry pkg.ToolRegistry, call pkg.T
 	}
 	return result, nil
 }
+
+// toolCallSummary produces a short human-readable summary of tool args for dry-run logging.
+func toolCallSummary(args map[string]any) string {
+	data, err := json.Marshal(args)
+	if err != nil {
+		return "[unserializable args]"
+	}
+	s := string(data)
+	if len(s) > 120 {
+		return s[:120] + "..."
+	}
+	return s
+}
