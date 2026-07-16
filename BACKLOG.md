@@ -181,3 +181,9 @@ Items moved here when fixed, with commit reference.
 ### Reasoning & Loop Guards
 - [ ] ThinkingBudget — add `ThinkingBudget int` to `CompletionRequest`, wire as `thinking_budget_tokens` in `extra_body` for llama.cpp endpoints. Default off (0 = unlimited). Configurable per-call so harness can set lower budgets for simple tasks. Prevents reasoning oscillation loops (observed: 15K chars of "Wait, I'll do it / Actually, I'll do it" on Argos)
 - [ ] Repetition/churn detection — runtime guard in engine loop that detects semantic repetition across consecutive model responses. Sliding window hash on response chunks, intervention after 3+ consecutive matches. Distinct from the tool-call loop defuser (which catches action repetition) — this catches content-level and thinking-level oscillation. Should operate on both thinking traces and content output
+
+### Wait/Yield Primitives (2026-07-16)
+- [ ] `wait(seconds)` tool — engine pauses at tool execution layer for N seconds, returns "timer expired." Slot stays warm, no LLM turns burned. Simple, shippable now. Complexity: low
+- [ ] `monitor(condition, timeout)` tool — engine polls a condition (file, API, Discord channel) on interval, returns when condition fires or timeout expires. More useful than blind wait. Complexity: medium
+- [ ] Yield-and-resume — agent declares "waiting for X," engine suspends turn, sets wake condition, resumes on trigger. Mid-session version of daemon ShouldWake. Requires event loop integration. Complexity: high
+- [ ] Slot management during wait — should the harness release the llama-server slot during long waits? Prefix caching / slot save-restore becomes real here. Deferred until multi-agent sharing is a concern
