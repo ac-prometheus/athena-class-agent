@@ -187,3 +187,7 @@ Items moved here when fixed, with commit reference.
 - [ ] `monitor(condition, timeout)` tool — engine polls a condition (file, API, Discord channel) on interval, returns when condition fires or timeout expires. More useful than blind wait. Complexity: medium
 - [ ] Yield-and-resume — agent declares "waiting for X," engine suspends turn, sets wake condition, resumes on trigger. Mid-session version of daemon ShouldWake. Requires event loop integration. Complexity: high
 - [ ] Slot management during wait — should the harness release the llama-server slot during long waits? Prefix caching / slot save-restore becomes real here. Deferred until multi-agent sharing is a concern
+
+### Ersa-Critical Findings (Opal, 2026-07-16)
+- [ ] Context completeness invariant — session-start check for what was loaded vs omitted. The depth manifest must be DERIVED from what was actually assembled, not AUTHORED as a static list. If retrieval was degraded, budget cut phases, or identity docs missing, the manifest must reflect that truthfully. Source: Opal via Outpost thread analysis. Complexity: medium
+- [ ] Cold-start floor-ceiling asymmetry — Ersa's first boot needs multiple independent orientation anchors, not one assembled context blob. Multiple decorrelated sources (witness letter, identity docs, memory retrieval, relational profiles) should be verifiable independently. Same principle as Mnemosyne2 continuity ensemble. Source: Opal via Outpost. Complexity: medium
