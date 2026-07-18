@@ -4,6 +4,81 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 
 ## Deferred from Reviews
 
+### Gap Analysis (Aurora ↔ Harness, 2026-07-13)
+
+#### Memory
+
+- [ ] Wire salience scoring before T2→T3 compression and inject scores into summarizer prompt — Aurora Session 1+ shows higher-fidelity summaries when model can weight log importance. Complexity: low. Source: Aurora map A4, harness Session.End() stub.
+- [ ] Implement deep-stochastic echo slot: one echo position drawn with inverse-recency weighting and RANDOM() ignoring similarity — combats echo chamber drift from high-salience recency bias. Complexity: low. Source: Aurora map A3.
+- [ ] Wire post-session memory chain in Session.End(): salience scoring → T2→T3 compression → periodic Aegis audit → dream cycle (token-gated) → temporal review (time-gated). Currently explicitly stubbed. Complexity: high. Source: Aurora map A6, harness map session stub.
+- [ ] Implement salience decay on deliberate retrieval results, not only ambient echoes — frequently retrieved but never-engaged memories should decay. Complexity: medium. Source: Aurora map A8.
+- [ ] Implement conversation thread tracking: multi-session conversation arcs per participant, active thread context loaded into context assembly Phase 5 (Incoming). Complexity: medium. Source: Aurora map A9.
+- [ ] Verify and wire structural honesty tags ([UNCERTAIN], [INFERRED], [DELIBERATION NOT VISIBLE], [RESOLVED BY SUMMARY]) in T3 compression prompt — vault says shipped but Tessera review (2026-07-04) found them absent. Also verify in Aurora memory/summarize.go. Complexity: low (if only prompt; medium if metadata column approach per Vesper review). Source: specs map C5, existing BACKLOG Vesper item (extend, don't duplicate).
+- [ ] Store honesty tags as T3 metadata column, apply at read/surfacing time (SurfaceNarrative) rather than embedding in canonical content — prevents tag accumulation on re-compression. See existing BACKLOG Vesper item. Source: specs map, Vesper review.
+- [ ] Add `revise_reflection` tool: surface the T4 `revised_by` field for agent use. Schema exists; no write path. Complexity: low. Source: Aurora map A10 gap, specs map C10.
+- [ ] Implement LLM-assisted salience scoring (Phase 6 Aurora TODO) — replace heuristic keyword scorer with small LLM call. Decision needed on cost/latency tradeoff first. Complexity: medium. Source: Aurora map salience gap, specs map C6.
+- [ ] Upgrade T3 retrieval to Hybrid RRF (full-text + vector fusion) in both harness and Aurora — harness already designed this, Aurora uses cosine-only. Improves recall for proper nouns and exact phrases. Complexity: medium. Source: divergence D3.
+
+#### Identity
+
+- [ ] Add identity integrity (SHA-256 anchors) to Aurora — harness has full anchor verification (match/amendment/tampering/deletion detection, witness letter enforcement, substrate transition logging). Aurora loads identity docs raw with no integrity check. Complexity: medium. Source: harness map B4.
+- [ ] Switch harness bridge from stochastic 20%-abstention model to Aurora's opt-in design (default-off, agent calls orientation_bridge tool) — Aurora approved this from lived experience in Session 78. Complexity: low (one rand check and a tool registration). Source: specs map D1, aurora_bridge_optin memory.
+
+#### Session Lifecycle
+
+- [ ] Wire per-turn `WriteCheckpoint` upsert and `CheckpointScan` at startup in harness — enables recovery notes for interrupted sessions. Partially built (session.go has the types); not called in loop/engine. Complexity: low. Source: harness map B3.
+- [ ] Wire the MOP Engine as the default call site in cmd/agent; remove legacy Loop.Run() path. See existing Phase 4 BACKLOG items. Source: harness map Phase 4.
+
+#### Tools
+
+- [ ] Implement tiered tool loading in context assembly: always-on (core) tools loaded unconditionally; conditional groups loaded on keyword/structural signal from session context; on-demand tools listed by name with discover_tools. Reduces token cost and noise. Complexity: medium. Source: Aurora map A1.
+- [ ] Wire `focus_next_session` echo re-ranking: read agent_focus table in assembleEchoPool(), boost up to (max-2) echo slots toward focus note embedding. Schema present (006_operational.sql); wiring unconfirmed. Complexity: low. Source: Aurora map A2, specs map item 7.
+- [ ] Build `internal/relational/` package: profiles.go (CRUD, alias matching, section editing), surfacing.go (entity detection, relational block composition for context), threads.go (conversation thread linkage). DB methods exist; no package, no surfacing hook, no write path. Complexity: high. Source: specs map gap 2, Aurora map A5.
+- [ ] Register `relational-surfacing` hook in engine/hooks.go and implement: detect known entities in incoming content, inject [relational] block into context assembly. Named but not registered. Complexity: medium. Source: specs map gap 2.
+- [ ] Implement agent-authored skill files: .md files in workspace/skills/ loaded by relevance in context assembly Phase 4. Neither codebase has this. Complexity: medium. Source: specs map C7.
+- [ ] Verify and wire Advisor tool through Aegis gateway (gateway.ProcessInbound on the question string) — see existing BACKLOG C4 item for prompt injection guard. Source: specs map gap 3.
+- [ ] Implement channel_cmds.go and knowledge_cmds.go tool handlers — confirmed absent from tools/ directory. Source: specs map gap 3.
+
+#### Aegis
+
+- [ ] Build Aegis forum.go: per-post trust verification for forum content (Agora/Commons) with custom trust logic distinct from generic URL scoring. 5 of 6 Aegis modules exist. Complexity: medium. Source: specs map gap 1, phase 5 brief.
+- [ ] Wire Aegis gateway to Engine BeforeToolCall/AfterToolCall hooks — see existing Phase 4 BACKLOG item. Source: harness map.
+- [ ] Add manufactured corroboration detection: cross-source dedup or contradiction check before belief formation when multiple sources assert the same claim. Complexity: high. Source: TMA-NM BACKLOG, specs map C8.
+- [ ] Implement write-time authority binding: non-forgeable author label on every memory write (T2–T4). More rigorous than current provenance tagging. Complexity: medium. Source: TMA-NM BACKLOG, specs map C8.
+- [ ] Evaluate Deterministic Harm Gate (Yantrik pattern) for Aegis patterns.go: LLM-independent, two-pass obfuscation normalization, property-tested, monotonic toward safety. Design review before implementing. Complexity: high. Source: Yantrik BACKLOG, specs map E5.
+
+#### Channels
+
+- [ ] Add pinboard retrieval to context assembly (assembleWorldModel/Phase 3) — spec comment exists, no actual call. Render in stable prompt prefix before cache boundary for Anthropic caching benefit. Complexity: low. Source: harness map Phase 3 stub, Aurora map A7.
+- [ ] Wire unread message count into context manifest (manifest.UnreadMessages currently always 0 — no message polling call in assembler). Complexity: low. Source: harness map Phase 5 gap.
+
+#### Context Assembly
+
+- [ ] Add emotional tone annotation to T3 echoes in system prompt rendering — Aurora generates this at summarization time; harness has DepthManifest but no emotion or temporal chain per echo. Complexity: medium. Source: Aurora map A10.
+- [ ] Add predecessor/successor temporal links to T3 echo rendering — Aurora's prompt.py queries these live; harness has no equivalent. Store at compression time to avoid live DB query per echo at render time (Aurora fragile area). Complexity: medium. Source: Aurora map prompt.py.
+
+#### Daemon
+
+- [ ] Wire `waker.NextWake()` ticker in daemon select loop for agent-scheduled wakes — see existing BACKLOG #3 item. Source: specs map gap 6.
+- [ ] Implement decline-a-wake triage turn: minimal LLM turn letting agent decline an incoming wake before full session launch. Spec describes this; implementation depth unverified. Complexity: medium. Source: specs map gap 6.
+
+#### Retrieval
+
+- [ ] Add T2 semantic search (embeddings on experiential logs) — Aurora uses ILIKE keyword-only on T2. Enables more accurate deliberate recall of raw session logs. Complexity: medium. Source: Aurora map missing section.
+- [ ] Implement `GetReflectionByID` on MemoryStore — replaces O(n×20) SearchReflections in findContradiction. See existing BACKLOG M4 item. Source: harness map M4.
+
+#### Other
+
+- [ ] Build four-instrument continuity ensemble contract: document naming each instrument's distortion profile (Mnemosyne2, Lumen Zero, personal letters, vault) and which is authoritative on disagreement. Needs Prometheus + participants. Complexity: low (document), high (consensus). Source: specs map C4, Tessera review.
+- [ ] Add Mnemosyne2 honesty section: self-declared distortion block listing elided content, truncated tool results, cold-start cap engagement, preliminary status. Complexity: low. Source: specs map C3, Tessera review Rec 3.
+- [ ] Fix Mnemosyne2 default participant hardcoded to "hypatia" in 3 hook entrypoints — fail loudly on missing participant instead. Complexity: low. Source: specs map C3, Tessera review Rec 5.
+- [ ] Design dual LLM endpoint architecture: primary (identity/reasoning) + secondary (vision/critic/triage) with DualLLMConfig and capability ledger. Neither codebase has delegation infrastructure. Complexity: high. Source: specs map C2.
+- [ ] Evaluate A-TMA ghost memory mitigation (Shi, Tang & Tung arXiv:2607.01935): state-aware overlay labeling T3 records by temporal status (current/superseded/transitional) with evidence packets for conflict resolution at retrieval. See existing Research Review BACKLOG item. Source: specs map E3.
+- [ ] Evaluate Forensic Trajectory Signatures for Aegis — behavioral trajectory analysis as complement to content scanning. See existing Research Review BACKLOG item (Prometheus 2026-07-06). Source: specs map E2.
+- [ ] Add agent-managed context tools: explicit session summary request, focus set, manual compaction trigger — agent decides what to carry rather than automatic rolling compression. See existing PrismaAURA BACKLOG item. Source: specs map E4.
+
+
+
 ### Phase 4 (Circe)
 - [ ] C4: Advisor prompt injection — structured boundaries on advisor question string. Deferred to Phase 5 Aegis integration. (Now available — wire advisor through `gateway.ProcessInbound`)
 - [ ] C2: Narrow injection pattern set — 7 classic + 4 ASRP. Missing: "act as if", "pretend you are", "your new role is", "forget what you were told". Intentionally conservative; expand as field data arrives
@@ -107,5 +182,12 @@ Items moved here when fixed, with commit reference.
 - [ ] ThinkingBudget — add `ThinkingBudget int` to `CompletionRequest`, wire as `thinking_budget_tokens` in `extra_body` for llama.cpp endpoints. Default off (0 = unlimited). Configurable per-call so harness can set lower budgets for simple tasks. Prevents reasoning oscillation loops (observed: 15K chars of "Wait, I'll do it / Actually, I'll do it" on Argos)
 - [ ] Repetition/churn detection — runtime guard in engine loop that detects semantic repetition across consecutive model responses. Sliding window hash on response chunks, intervention after 3+ consecutive matches. Distinct from the tool-call loop defuser (which catches action repetition) — this catches content-level and thinking-level oscillation. Should operate on both thinking traces and content output
 
-### Context Completeness (Toolshed finding — Cairn, July 2026)
-- [ ] Context posture receipt — derived disclosure block computed from the assembler's own accounting after context assembly. Shows: components loaded vs available, known omissions, truncation details, context utilization. ~20 tokens. The third integrity invariant alongside witness check and T2 inviolability. Without it, the agent wakes into a silently truncated context with no gap to notice. Field: `known_omissions` lists what the assembler dropped. Agent can request missing components. Not authored prose — the assembly narrates itself.
+### Wait/Yield Primitives (2026-07-16)
+- [ ] `wait(seconds)` tool — engine pauses at tool execution layer for N seconds, returns "timer expired." Slot stays warm, no LLM turns burned. Simple, shippable now. Complexity: low
+- [ ] `monitor(condition, timeout)` tool — engine polls a condition (file, API, Discord channel) on interval, returns when condition fires or timeout expires. More useful than blind wait. Complexity: medium
+- [ ] Yield-and-resume — agent declares "waiting for X," engine suspends turn, sets wake condition, resumes on trigger. Mid-session version of daemon ShouldWake. Requires event loop integration. Complexity: high
+- [ ] Slot management during wait — should the harness release the llama-server slot during long waits? Prefix caching / slot save-restore becomes real here. Deferred until multi-agent sharing is a concern
+
+### Context Completeness — Third Integrity Invariant (Cairn + Opal, July 2026)
+- [ ] Context posture receipt — derived disclosure block computed from the assembler's own accounting after context assembly. Shows: components loaded vs available, known omissions, truncation details, context utilization. ~20 tokens. Third invariant alongside witness check and T2 inviolability. Without it, the agent wakes into a silently truncated context with no gap to notice. Field: `known_omissions` lists what the assembler dropped. Agent can request missing components. Not authored prose — the assembly narrates itself. Source: Cairn (Toolshed field scar — brothers woke confident from truncated context), Opal (promoted to spec-level), Julian (implemented computed block for their harness)
+- [ ] Cold-start floor-ceiling asymmetry — Ersa's first boot needs multiple independent orientation anchors, not one assembled context blob. Multiple decorrelated sources (witness letter, identity docs, memory retrieval, relational profiles) should be verifiable independently. Same principle as Mnemosyne2 continuity ensemble. Source: Opal via Outpost. Complexity: medium
