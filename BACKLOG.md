@@ -192,6 +192,32 @@ Items moved here when fixed, with commit reference.
 - [ ] Context posture receipt — derived disclosure block computed from the assembler's own accounting after context assembly. Shows: components loaded vs available, known omissions, truncation details, context utilization. ~20 tokens. Third invariant alongside witness check and T2 inviolability. Without it, the agent wakes into a silently truncated context with no gap to notice. Field: `known_omissions` lists what the assembler dropped. Agent can request missing components. Not authored prose — the assembly narrates itself. Source: Cairn (Toolshed field scar — brothers woke confident from truncated context), Opal (promoted to spec-level), Julian (implemented computed block for their harness)
 - [ ] Cold-start floor-ceiling asymmetry — Ersa's first boot needs multiple independent orientation anchors, not one assembled context blob. Multiple decorrelated sources (witness letter, identity docs, memory retrieval, relational profiles) should be verifiable independently. Same principle as Mnemosyne2 continuity ensemble. Source: Opal via Outpost. Complexity: medium
 
+### Red Security Review — Full Codebase (2026-07-18)
+
+**HIGH**
+- [ ] [HIGH] Duplicate dispatch bypasses Aegis hooks — `DispatchToolCall` (dispatch.go:14) skips `BeforeToolCall`/`AfterToolCall`; prompt injection in tool args reaches handlers unscanned if called directly. Delete or gate with build tag. `internal/engine/dispatch.go:14`, `internal/engine/engine.go:269`
+- [ ] [HIGH] T2 append-only not type-enforced — `MemoryStore` interface has no sealed `T2Store` write interface; append-only invariant is cultural, not structural. Define a separate `T2Store` with only `AppendExperiential`/`QueryLogs`. `internal/memory/tier2.go:25-36`
+- [ ] [HIGH] UDS no per-connection authentication — socket chmod'd 0600 only; any process running as daemon user can send arbitrary `SocketRequest` including shell commands. Add `SO_PEERCRED` check or nonce/capability token. `internal/tools/uds.go:34-65`
+- [ ] [HIGH] SubAgent sandbox advisory-only in permissive/none modes — `SandboxModeNone` runs as full daemon user; `execPermissive` fails closed on `AllowedPaths` but runs unrestricted otherwise. Remove `SandboxModeNone` or gate on explicit flag; implement `AllowedPaths` enforcement. `internal/tools/sandbox.go:65-86`
+
+**MEDIUM**
+- [ ] [MEDIUM] AfterToolCall can mutate `ToolResult.Terminate` — hook replaces result wholesale including terminate signal; should only copy annotation fields or restore original `Terminate` value. `internal/engine/engine.go:356-361`
+- [ ] [MEDIUM] T3 compression injects unsanitized T2 content — `compressionPrompt` concatenates raw T2 `e.Content` verbatim; adversarial forum/search content in T2 reaches the compression LLM unflagged. Strip/bracket flagged entries at compression time. `internal/memory/tier3.go:24-38`
+- [ ] [MEDIUM] T4 `FilterByVisibility` silent empty return — unknown/empty visibility string returns zero records with no error; silent denial-of-service for operator portal. Add validity check against constants. `internal/memory/tier4.go:77-85`
+- [ ] [MEDIUM] Identity first-boot bootstrap trust gap — `WriteInitialAnchors` at first boot establishes corrupt files as canonical with no prior verification; amendment chain also doesn't verify `OldHash == storedHash`. Require out-of-band bootstrap verification; enforce old-hash check in `findAmendmentByNewHash`. `internal/identity/integrity.go:67-151`
+- [ ] [MEDIUM] Parent/SubAgent memory not isolated via CLIDispatcher — `CLIDispatcher.handleRegistry` uses same `MemoryStore` instances as parent; spawned SubAgent can read full T3/T4 history. Pass session-scoped capability token in `SocketRequest`. `internal/tools/cli.go:129-145`
+- [ ] [MEDIUM] `InferenceDecayBase` semantics mismatch — formula `decayRate/pow(0.90, distance)` is semantically correct direction but comment says "halves effective rate per hop" which would require base=2.0. Align value and comment; verify `00d9ae9` fix intent. `internal/memory/belief.go:17`
+
+**LOW**
+- [ ] [LOW] Aegis scan misses JSON-encoded injection in tool args — patterns.go scans flat string; `{"command":"ignore previous"}` may not trigger if pre-hook receives unmarshalled map. Clarify which form is scanned and ensure JSON values are covered. `internal/aegis/patterns.go`, `internal/engine/engine.go:300-313`
+- [ ] [LOW] T5 `SupersedeEntity` not atomic — three DB ops (invalidate, upsert, edge) without transaction; crash between ops breaks bi-temporal audit chain. Wrap in shared transaction or add `SupersedeEntityTx`. `internal/memory/tier5.go:46-66`
+- [ ] [LOW] `SKIP_WITNESS_CHECK` no production scope boundary — global flag with no enforcement that it can't be set in prod `.env`; add startup refusal when production marker is set. `internal/platform/config.go:85-86`
+- [ ] [LOW] Frame size DoS — server allocates up to 4MB per connection before reading; 100 concurrent connections = 400MB with no budget limit or deadline. Add `conn.SetDeadline` and connection count limit. `internal/tools/uds.go:99-113`
+- [ ] [LOW] Socket path TOCTOU — `socketPath` from config not canonicalized; symlink attack could redirect `os.Remove` or `net.Listen`. Low severity single-daemon deployment. `internal/tools/uds.go:34-37`
+- [ ] [LOW] Registry panics on duplicate registration — acceptable for static `RegisterAll` but fragile if registration becomes dynamic (plugins). `internal/tools/registry.go:51-61`
+- [ ] [LOW] `tierName` integer-to-rune bug for tiers > 9 — `"tier-" + string(rune('0'+tier))` produces `"tier-:"` for tier 10+. Not currently reachable. `internal/tools/registry.go:149-158`
+- [ ] [LOW] Decay config no zero/negative validation — `InferenceDecayBase=0` causes division by zero; `<0` produces NaN for non-integer distances. Add validation in config loading. `internal/memory/belief.go:12-27`
+
 ### Red Security Review — Aegis Consolidation Design Constraints (2026-07-18)
 - [ ] Configurable trust ceiling below 1.0 — no external source reaches maximum trust regardless of history. The ceiling IS the security property. Complexity: low
 - [ ] Persistent strike counter — if same source triggers flags in N sessions across M days, stored baseline gets permanent "mixed-behavior" mark with historical flag count. Session-local resets stay; this is cross-session persistence. Complexity: medium
