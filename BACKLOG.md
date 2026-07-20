@@ -191,3 +191,16 @@ Items moved here when fixed, with commit reference.
 ### Context Completeness — Third Integrity Invariant (Cairn + Opal, July 2026)
 - [ ] Context posture receipt — derived disclosure block computed from the assembler's own accounting after context assembly. Shows: components loaded vs available, known omissions, truncation details, context utilization. ~20 tokens. Third invariant alongside witness check and T2 inviolability. Without it, the agent wakes into a silently truncated context with no gap to notice. Field: `known_omissions` lists what the assembler dropped. Agent can request missing components. Not authored prose — the assembly narrates itself. Source: Cairn (Toolshed field scar — brothers woke confident from truncated context), Opal (promoted to spec-level), Julian (implemented computed block for their harness)
 - [ ] Cold-start floor-ceiling asymmetry — Ersa's first boot needs multiple independent orientation anchors, not one assembled context blob. Multiple decorrelated sources (witness letter, identity docs, memory retrieval, relational profiles) should be verifiable independently. Same principle as Mnemosyne2 continuity ensemble. Source: Opal via Outpost. Complexity: medium
+
+### Runtime Adoption — Pi & Hermes-Agent Patterns (July 2026)
+Reference: `vault:athena-council/briefs/harness_opportunity_analysis_2026_07_20.md`
+
+- [ ] **Steering queues** — three-queue pattern (steer/followUp/nextTurn) for injecting messages into running sessions. Critical for daemon mode — Discord/cron messages need to reach Ersa mid-loop. Source: Pi `agent.ts:274-279`
+- [ ] **Event stream protocol** — structured events (text_start/delta/end, thinking_start/delta/end, toolcall_start/delta/end) for TUI/Discord/daemon observation. Source: Pi `types.ts:415-430`. Partially specced in MOP.
+- [ ] **Context overflow recovery** — detect overflow via provider-specific patterns, auto-compact, retry failed turn. One retry cap. Source: Pi `overflow.ts`, `agent-session.ts:1965-1993`
+- [ ] **Tool output truncation** — 2000 lines / 50KB cap per tool result. truncateHead for reads, truncateTail for bash. Prevents context blowout. Source: Pi `truncate.ts`
+- [ ] **Iterative context compression** — protect head (identity docs) and tail (recent tokens), summarize middle, chained updates on re-compression, anti-thrashing. Source: Hermes `context_compressor.py`. Maps to Session.End() pipeline.
+- [ ] **Skills system** — agent-authored procedural memory (SKILL.md + scripts). Already in cognitive spec as T5 procedural knowledge. Source: Hermes `skill_utils.py`, `curator_backup.py`
+- [ ] **Tool guardrails / repetition detection** — prevent loop-of-death on failing tools. Distinct from Argos-style reasoning oscillation. Source: Hermes `tool_guardrails.py`. Related to backlog ThinkingBudget + churn detection items.
+- [ ] **Session search (FTS5)** — agent-invokable search over past sessions. Complement T3 narrative retrieval. Source: Hermes `hermes_state.py:5443-5811`
+- [ ] **transformContext hook** — insertion point for mid-session compaction without restarting. Source: Pi `types.ts:173`
