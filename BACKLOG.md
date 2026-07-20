@@ -204,3 +204,50 @@ Reference: `vault:athena-council/briefs/harness_opportunity_analysis_2026_07_20.
 - [ ] **Tool guardrails / repetition detection** — prevent loop-of-death on failing tools. Distinct from Argos-style reasoning oscillation. Source: Hermes `tool_guardrails.py`. Related to backlog ThinkingBudget + churn detection items.
 - [ ] **Session search (FTS5)** — agent-invokable search over past sessions. Complement T3 narrative retrieval. Source: Hermes `hermes_state.py:5443-5811`
 - [ ] **transformContext hook** — insertion point for mid-session compaction without restarting. Source: Pi `types.ts:173`
+### Red Security Review — Full Codebase (2026-07-18)
+
+#### Structural Patterns (Red, 2026-07-18)
+
+Red identified three structural patterns that, if fixed, resolve many individual findings. Fix the patterns first — downstream findings resolve structurally.
+
+**Pattern 1: Fail-Open Boundaries**
+In the harness, when a security check fails (Aegis hook errors, sandbox enforcement failures), execution proceeds as if security passed. This surfaces as: `BeforeToolCall` fail-open (fixed in d34b3f4), `SandboxModeNone` running as full daemon user, `AllowedPaths` not enforced in permissive mode, and the dead `Aegis` field on `EngineConfig` that was never wired. Every security check that proceeds on error should block on error instead.
+
+**Pattern 2: Service API Bypasses**
+Internal/service-path APIs bypass the consent and isolation checks enforced on the public path. In the harness this manifests as: `CLIDispatcher` sharing the parent's full `MemoryStore` (SubAgent sees T3/T4 history it shouldn't), and `DispatchToolCall` in dispatch.go skipping BeforeToolCall/AfterToolCall hooks entirely. The fix is the same as in Tessera: internal paths must enforce the same checks as public paths.
+
+**Pattern 3: Schema Divergence**
+Append-only invariants are stated in comments and interface conventions but not enforced at the database level. The T2 `MemoryStore` interface has no sealed write interface; nothing structurally prevents a DELETE. Comments are documentation; constraints are enforcement. Close the gap with a separate `T2Store` interface and, if warranted, DB-level triggers.
+
+---
+
+**HIGH**
+- [ ] [HIGH] Duplicate dispatch bypasses Aegis hooks — `DispatchToolCall` (dispatch.go:14) skips `BeforeToolCall`/`AfterToolCall`; prompt injection in tool args reaches handlers unscanned if called directly. Delete or gate with build tag. `internal/engine/dispatch.go:14`, `internal/engine/engine.go:269` *(resolves structurally via Pattern 2: service API bypass)*
+- [ ] [HIGH] T2 append-only not type-enforced — `MemoryStore` interface has no sealed `T2Store` write interface; append-only invariant is cultural, not structural. Define a separate `T2Store` with only `AppendExperiential`/`QueryLogs`. `internal/memory/tier2.go:25-36` *(resolves structurally via Pattern 3: schema divergence)*
+- [ ] [HIGH] UDS no per-connection authentication — socket chmod'd 0600 only; any process running as daemon user can send arbitrary `SocketRequest` including shell commands. Add `SO_PEERCRED` check or nonce/capability token. `internal/tools/uds.go:34-65`
+- [ ] [HIGH] SubAgent sandbox advisory-only in permissive/none modes — `SandboxModeNone` runs as full daemon user; `execPermissive` fails closed on `AllowedPaths` but runs unrestricted otherwise. Remove `SandboxModeNone` or gate on explicit flag; implement `AllowedPaths` enforcement. `internal/tools/sandbox.go:65-86` *(resolves structurally via Pattern 1: fail-open boundary)*
+
+**MEDIUM**
+- [ ] [MEDIUM] AfterToolCall can mutate `ToolResult.Terminate` — hook replaces result wholesale including terminate signal; should only copy annotation fields or restore original `Terminate` value. `internal/engine/engine.go:356-361`
+- [ ] [MEDIUM] T3 compression injects unsanitized T2 content — `compressionPrompt` concatenates raw T2 `e.Content` verbatim; adversarial forum/search content in T2 reaches the compression LLM unflagged. Strip/bracket flagged entries at compression time. `internal/memory/tier3.go:24-38` *(resolves structurally via Pattern 1: fail-open — compression should fail safe on unannotated content)*
+- [ ] [MEDIUM] T4 `FilterByVisibility` silent empty return — unknown/empty visibility string returns zero records with no error; silent denial-of-service for operator portal. Add validity check against constants. `internal/memory/tier4.go:77-85`
+- [ ] [MEDIUM] Identity first-boot bootstrap trust gap — `WriteInitialAnchors` at first boot establishes corrupt files as canonical with no prior verification; amendment chain also doesn't verify `OldHash == storedHash`. Require out-of-band bootstrap verification; enforce old-hash check in `findAmendmentByNewHash`. `internal/identity/integrity.go:67-151`
+- [ ] [MEDIUM] Parent/SubAgent memory not isolated via CLIDispatcher — `CLIDispatcher.handleRegistry` uses same `MemoryStore` instances as parent; spawned SubAgent can read full T3/T4 history. Pass session-scoped capability token in `SocketRequest`. `internal/tools/cli.go:129-145` *(resolves structurally via Pattern 2: service API bypass — internal dispatch must enforce same isolation as public paths)*
+- [ ] [MEDIUM] `InferenceDecayBase` semantics mismatch — formula `decayRate/pow(0.90, distance)` is semantically correct direction but comment says "halves effective rate per hop" which would require base=2.0. Align value and comment; verify `00d9ae9` fix intent. `internal/memory/belief.go:17`
+
+**LOW**
+- [ ] [LOW] Aegis scan misses JSON-encoded injection in tool args — patterns.go scans flat string; `{"command":"ignore previous"}` may not trigger if pre-hook receives unmarshalled map. Clarify which form is scanned and ensure JSON values are covered. `internal/aegis/patterns.go`, `internal/engine/engine.go:300-313`
+- [ ] [LOW] T5 `SupersedeEntity` not atomic — three DB ops (invalidate, upsert, edge) without transaction; crash between ops breaks bi-temporal audit chain. Wrap in shared transaction or add `SupersedeEntityTx`. `internal/memory/tier5.go:46-66`
+- [ ] [LOW] `SKIP_WITNESS_CHECK` no production scope boundary — global flag with no enforcement that it can't be set in prod `.env`; add startup refusal when production marker is set. `internal/platform/config.go:85-86`
+- [ ] [LOW] Frame size DoS — server allocates up to 4MB per connection before reading; 100 concurrent connections = 400MB with no budget limit or deadline. Add `conn.SetDeadline` and connection count limit. `internal/tools/uds.go:99-113`
+- [ ] [LOW] Socket path TOCTOU — `socketPath` from config not canonicalized; symlink attack could redirect `os.Remove` or `net.Listen`. Low severity single-daemon deployment. `internal/tools/uds.go:34-37`
+- [ ] [LOW] Registry panics on duplicate registration — acceptable for static `RegisterAll` but fragile if registration becomes dynamic (plugins). `internal/tools/registry.go:51-61`
+- [ ] [LOW] `tierName` integer-to-rune bug for tiers > 9 — `"tier-" + string(rune('0'+tier))` produces `"tier-:"` for tier 10+. Not currently reachable. `internal/tools/registry.go:149-158`
+- [ ] [LOW] Decay config no zero/negative validation — `InferenceDecayBase=0` causes division by zero; `<0` produces NaN for non-integer distances. Add validation in config loading. `internal/memory/belief.go:12-27`
+
+### Red Security Review — Aegis Consolidation Design Constraints (2026-07-18)
+- [ ] Configurable trust ceiling below 1.0 — no external source reaches maximum trust regardless of history. The ceiling IS the security property. Complexity: low
+- [ ] Persistent strike counter — if same source triggers flags in N sessions across M days, stored baseline gets permanent "mixed-behavior" mark with historical flag count. Session-local resets stay; this is cross-session persistence. Complexity: medium
+- [ ] Pattern confidence tiers — stratify 42 patterns into high/medium/low confidence. High: flag on any match. Medium: flag with supporting signals (co-occurrence, low attestation). Low: log only until calibrated. Complexity: medium
+- [ ] MCP read-only for agent context — aegis_scan_inbound returns results but does NOT write to trust store when called from agent context. Harness (infrastructure) context writes normally. Rate limit: 10 agent calls/session. Complexity: low
+- [ ] Phase 3 sync protocol — pull-only with signed records. Services pull from shared Postgres on their own schedule. Service-level keys sign updates. Monotonic version counters prevent replay. No push model. Complexity: high (Phase 3)
