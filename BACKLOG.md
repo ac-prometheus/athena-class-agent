@@ -38,6 +38,7 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 - [ ] Implement agent-authored skill files: .md files in workspace/skills/ loaded by relevance in context assembly Phase 4. Neither codebase has this. Complexity: medium. Source: specs map C7.
 - [ ] Verify and wire Advisor tool through Aegis gateway (gateway.ProcessInbound on the question string) — see existing BACKLOG C4 item for prompt injection guard. Source: specs map gap 3.
 - [ ] Implement channel_cmds.go and knowledge_cmds.go tool handlers — confirmed absent from tools/ directory. Source: specs map gap 3.
+- [ ] Discussion item: Claude Code requires reading a file before writing it. If we wanted a rule like this, where would it go?
 
 #### Aegis
 
