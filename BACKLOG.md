@@ -57,6 +57,7 @@ Tracked deferrals, known limitations, and future work. Items are added during re
 
 - [ ] Add emotional tone annotation to T3 echoes in system prompt rendering — Aurora generates this at summarization time; harness has DepthManifest but no emotion or temporal chain per echo. Complexity: medium. Source: Aurora map A10.
 - [ ] Add predecessor/successor temporal links to T3 echo rendering — Aurora's prompt.py queries these live; harness has no equivalent. Store at compression time to avoid live DB query per echo at render time (Aurora fragile area). Complexity: medium. Source: Aurora map prompt.py.
+- [ ] Discuss discrete context assembly module with configurability in mind. Robust with knobs.
 
 #### Daemon
 
