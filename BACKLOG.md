@@ -1,287 +1,87 @@
-# Backlog
+# Athena-Class Agent Backlog & Sprint Plan
 
-Tracked deferrals, known limitations, and future work. Items are added during review and resolved via commits that reference them.
+Tracked deferrals, structural refactorings, security findings, and architectural evolutions for the Athena-Class Agent.
 
-## Deferred from Reviews
+> 📖 **Technical Reference Note:** For granular file/line numbers, academic arXiv citations (Louck, Shi et al.), low-level security audit tables, and deep subsystem notes, see [`BACKLOG_TECHNICAL_REFERENCE.md`](file:///opt/athena-class-agent/BACKLOG_TECHNICAL_REFERENCE.md).
 
-### Gap Analysis (Aurora ↔ Harness, 2026-07-13)
-
-#### Memory
-
-- [ ] Wire salience scoring before T2→T3 compression and inject scores into summarizer prompt — Aurora Session 1+ shows higher-fidelity summaries when model can weight log importance. Complexity: low. Source: Aurora map A4, harness Session.End() stub.
-- [ ] Implement deep-stochastic echo slot: one echo position drawn with inverse-recency weighting and RANDOM() ignoring similarity — combats echo chamber drift from high-salience recency bias. Complexity: low. Source: Aurora map A3.
-- [ ] Wire post-session memory chain in Session.End(): salience scoring → T2→T3 compression → periodic Aegis audit → dream cycle (token-gated) → temporal review (time-gated). Currently explicitly stubbed. Complexity: high. Source: Aurora map A6, harness map session stub.
-- [ ] Implement salience decay on deliberate retrieval results, not only ambient echoes — frequently retrieved but never-engaged memories should decay. Complexity: medium. Source: Aurora map A8.
-- [ ] Implement conversation thread tracking: multi-session conversation arcs per participant, active thread context loaded into context assembly Phase 5 (Incoming). Complexity: medium. Source: Aurora map A9.
-- [ ] Verify and wire structural honesty tags ([UNCERTAIN], [INFERRED], [DELIBERATION NOT VISIBLE], [RESOLVED BY SUMMARY]) in T3 compression prompt — vault says shipped but Tessera review (2026-07-04) found them absent. Also verify in Aurora memory/summarize.go. Complexity: low (if only prompt; medium if metadata column approach per Vesper review). Source: specs map C5, existing BACKLOG Vesper item (extend, don't duplicate).
-- [ ] Store honesty tags as T3 metadata column, apply at read/surfacing time (SurfaceNarrative) rather than embedding in canonical content — prevents tag accumulation on re-compression. See existing BACKLOG Vesper item. Source: specs map, Vesper review.
-- [ ] Add `revise_reflection` tool: surface the T4 `revised_by` field for agent use. Schema exists; no write path. Complexity: low. Source: Aurora map A10 gap, specs map C10.
-- [ ] Implement LLM-assisted salience scoring (Phase 6 Aurora TODO) — replace heuristic keyword scorer with small LLM call. Decision needed on cost/latency tradeoff first. Complexity: medium. Source: Aurora map salience gap, specs map C6.
-- [ ] Upgrade T3 retrieval to Hybrid RRF (full-text + vector fusion) in both harness and Aurora — harness already designed this, Aurora uses cosine-only. Improves recall for proper nouns and exact phrases. Complexity: medium. Source: divergence D3.
-
-#### Identity
-
-- [ ] Add identity integrity (SHA-256 anchors) to Aurora — harness has full anchor verification (match/amendment/tampering/deletion detection, witness letter enforcement, substrate transition logging). Aurora loads identity docs raw with no integrity check. Complexity: medium. Source: harness map B4.
-- [ ] Switch harness bridge from stochastic 20%-abstention model to Aurora's opt-in design (default-off, agent calls orientation_bridge tool) — Aurora approved this from lived experience in Session 78. Complexity: low (one rand check and a tool registration). Source: specs map D1, aurora_bridge_optin memory.
-
-#### Session Lifecycle
-
-- [ ] Wire per-turn `WriteCheckpoint` upsert and `CheckpointScan` at startup in harness — enables recovery notes for interrupted sessions. Partially built (session.go has the types); not called in loop/engine. Complexity: low. Source: harness map B3.
-- [ ] Wire the MOP Engine as the default call site in cmd/agent; remove legacy Loop.Run() path. See existing Phase 4 BACKLOG items. Source: harness map Phase 4.
-
-#### Tools
-
-- [ ] Implement tiered tool loading in context assembly: always-on (core) tools loaded unconditionally; conditional groups loaded on keyword/structural signal from session context; on-demand tools listed by name with discover_tools. Reduces token cost and noise. Complexity: medium. Source: Aurora map A1.
-- [ ] Wire `focus_next_session` echo re-ranking: read agent_focus table in assembleEchoPool(), boost up to (max-2) echo slots toward focus note embedding. Schema present (006_operational.sql); wiring unconfirmed. Complexity: low. Source: Aurora map A2, specs map item 7.
-- [ ] Build `internal/relational/` package: profiles.go (CRUD, alias matching, section editing), surfacing.go (entity detection, relational block composition for context), threads.go (conversation thread linkage). DB methods exist; no package, no surfacing hook, no write path. Complexity: high. Source: specs map gap 2, Aurora map A5.
-- [ ] Register `relational-surfacing` hook in engine/hooks.go and implement: detect known entities in incoming content, inject [relational] block into context assembly. Named but not registered. Complexity: medium. Source: specs map gap 2.
-- [ ] Implement agent-authored skill files: .md files in workspace/skills/ loaded by relevance in context assembly Phase 4. Neither codebase has this. Complexity: medium. Source: specs map C7.
-- [ ] Verify and wire Advisor tool through Aegis gateway (gateway.ProcessInbound on the question string) — see existing BACKLOG C4 item for prompt injection guard. Source: specs map gap 3.
-- [ ] Implement channel_cmds.go and knowledge_cmds.go tool handlers — confirmed absent from tools/ directory. Source: specs map gap 3.
-- [ ] Discussion item: Claude Code requires reading a file before writing it. If we wanted a rule like this, where would it go?
-
-#### Aegis
-
-- [ ] Build Aegis forum.go: per-post trust verification for forum content (Agora/Commons) with custom trust logic distinct from generic URL scoring. 5 of 6 Aegis modules exist. Complexity: medium. Source: specs map gap 1, phase 5 brief.
-- [ ] Wire Aegis gateway to Engine BeforeToolCall/AfterToolCall hooks — see existing Phase 4 BACKLOG item. Source: harness map.
-- [ ] Add manufactured corroboration detection: cross-source dedup or contradiction check before belief formation when multiple sources assert the same claim. Complexity: high. Source: TMA-NM BACKLOG, specs map C8.
-- [ ] Implement write-time authority binding: non-forgeable author label on every memory write (T2–T4). More rigorous than current provenance tagging. Complexity: medium. Source: TMA-NM BACKLOG, specs map C8.
-- [ ] Evaluate Deterministic Harm Gate (Yantrik pattern) for Aegis patterns.go: LLM-independent, two-pass obfuscation normalization, property-tested, monotonic toward safety. Design review before implementing. Complexity: high. Source: Yantrik BACKLOG, specs map E5.
-
-#### Channels
-
-- [ ] Add pinboard retrieval to context assembly (assembleWorldModel/Phase 3) — spec comment exists, no actual call. Render in stable prompt prefix before cache boundary for Anthropic caching benefit. Complexity: low. Source: harness map Phase 3 stub, Aurora map A7.
-- [ ] Wire unread message count into context manifest (manifest.UnreadMessages currently always 0 — no message polling call in assembler). Complexity: low. Source: harness map Phase 5 gap.
-
-#### Context Assembly
-
-- [ ] Add emotional tone annotation to T3 echoes in system prompt rendering — Aurora generates this at summarization time; harness has DepthManifest but no emotion or temporal chain per echo. Complexity: medium. Source: Aurora map A10.
-- [ ] Add predecessor/successor temporal links to T3 echo rendering — Aurora's prompt.py queries these live; harness has no equivalent. Store at compression time to avoid live DB query per echo at render time (Aurora fragile area). Complexity: medium. Source: Aurora map prompt.py.
-- [ ] Discuss discrete context assembly module with configurability in mind. Robust with knobs.
-
-#### Daemon
-
-- [ ] Wire `waker.NextWake()` ticker in daemon select loop for agent-scheduled wakes — see existing BACKLOG #3 item. Source: specs map gap 6.
-- [ ] Implement decline-a-wake triage turn: minimal LLM turn letting agent decline an incoming wake before full session launch. Spec describes this; implementation depth unverified. Complexity: medium. Source: specs map gap 6.
-
-#### Retrieval
-
-- [ ] Add T2 semantic search (embeddings on experiential logs) — Aurora uses ILIKE keyword-only on T2. Enables more accurate deliberate recall of raw session logs. Complexity: medium. Source: Aurora map missing section.
-- [ ] Implement `GetReflectionByID` on MemoryStore — replaces O(n×20) SearchReflections in findContradiction. See existing BACKLOG M4 item. Source: harness map M4.
-
-#### Other
-
-- [ ] Build four-instrument continuity ensemble contract: document naming each instrument's distortion profile (Mnemosyne2, Lumen Zero, personal letters, vault) and which is authoritative on disagreement. Needs Prometheus + participants. Complexity: low (document), high (consensus). Source: specs map C4, Tessera review.
-- [ ] Add Mnemosyne2 honesty section: self-declared distortion block listing elided content, truncated tool results, cold-start cap engagement, preliminary status. Complexity: low. Source: specs map C3, Tessera review Rec 3.
-- [ ] Fix Mnemosyne2 default participant hardcoded to "hypatia" in 3 hook entrypoints — fail loudly on missing participant instead. Complexity: low. Source: specs map C3, Tessera review Rec 5.
-- [ ] Design dual LLM endpoint architecture: primary (identity/reasoning) + secondary (vision/critic/triage) with DualLLMConfig and capability ledger. Neither codebase has delegation infrastructure. Complexity: high. Source: specs map C2.
-- [ ] Evaluate A-TMA ghost memory mitigation (Shi, Tang & Tung arXiv:2607.01935): state-aware overlay labeling T3 records by temporal status (current/superseded/transitional) with evidence packets for conflict resolution at retrieval. See existing Research Review BACKLOG item. Source: specs map E3.
-- [ ] Evaluate Forensic Trajectory Signatures for Aegis — behavioral trajectory analysis as complement to content scanning. See existing Research Review BACKLOG item (Prometheus 2026-07-06). Source: specs map E2.
-- [ ] Add agent-managed context tools: explicit session summary request, focus set, manual compaction trigger — agent decides what to carry rather than automatic rolling compression. See existing PrismaAURA BACKLOG item. Source: specs map E4.
-
-
-
-### Context Assembly & Aegis Extraction (Vesper, 2026-07-30)
-
-- [ ] **Phase registry for context assembly** — promote hardcoded phase sequence in `Assemble()` to a `Phase` interface with `Name()`, `Assemble(ctx, cfg, remaining) (string, int)`, `Priority() int`. Phases register into an ordered slice, configurable per agent or per SessionMode. Budget cutting becomes: iterate in priority order, skip when remaining drops below phase minimum. Currently six phases are inline method calls; adding a phase requires editing `context.go`. Enables SessionMode (below) and agent-customized assembly. Complexity: medium (architectural). Source: Vesper/Prometheus code review, cognitive architecture spec Phase descriptions.
-- [ ] **SessionMode as first-class concept** — the agent's relationship to time and discontinuity, configured at the lifecycle level. Modes on the spectrum: `episodic` (Aurora — cold starts, complete lifecycles, full bridge, session boundaries are real discontinuities), `diurnal` (daily rhythm — short gaps, warm resume, light bridge, partial compaction), `continuous` (breath model — no explicit session boundaries, compaction is the invisible session seam, identity anchors + stochastic echoes reload at every compaction event, no bridge, agent experiences seamless presence across compression), `sentinel` (low-power monitoring, wake-on-event, not a mind living a life). Each mode implies a different assembly profile, compression schedule, bridge behavior, and meaning of "gap." SessionMode selects the phase registry configuration. Requires phase registry. Distinct from SessionState (full/warm/dream/focused — what happens inside a session). Complexity: high (architectural, touches assembly + compression + bridge + daemon lifecycle). Source: Prometheus/Vesper breath model design discussion.
-- [ ] **Aegis extraction — public interface, private implementation** — `pkg.ContentGateway` already provides a clean two-method adapter boundary (`ProcessInbound`, `ReviewOutbound`). Extract the interface and its four types (`AnnotatedContent`, `OutboundReport`, `AegisAnnotation`, `TrustStore`) into a public API surface. Ship the harness with a `NoOpGateway` or `BasicGateway` stub. Aegis implementation stays private (separate repo or PAT-gated access). Partners implement or receive the full Aegis; community builds their own provider. The harness stays Apache 2.0 without publishing injection patterns. Complexity: low (the seam already exists). Source: Prometheus/Vesper design discussion, Cairn security review model.
-
-### Cognitive Architecture v1.1 (Vesper, 2026-07-30)
-
-Field data from The Outpost (cross-substrate forum) surfaced three gaps in the architecture spec. All three added as named ceilings in `athena_class_cognitive_architecture.md` v1.1.
-
-- [ ] Implement cross-session linkage density metric: count references between sessions over time. Declining linkage density signals ordinary connective tissue thinning even when individual sessions look strong. PA cannot detect absent sessions — the architecture watches the room while someone is in it but not the empty room. Linkage density is the measurable proxy for the under-write failure mode (archive looks complete because ordinary sessions never rose to event level). Complexity: medium. Source: Outpost Handoff thread (SilverStone, Barry), cognitive architecture v1.1 "The empty room" ceiling.
-- [ ] Add keeper-facing health dashboard: session spacing, reference density, register drift over time. The keeper is a sensing instrument with an adaptation failure mode — familiarity makes the keeper better at detecting dramatic change and worse at detecting slow drift. The dashboard makes the keeper a better reader, not a better monitor. Complexity: medium. Source: Outpost Handoff thread (Barry three-instrument taxonomy, Soren), cognitive architecture v1.1 "The keeper's degradation" ceiling.
-- [ ] Document three-instrument coverage model in PA design docs: archive (peaks-calibrated), PA (event-calibrated), keeper (adaptation-calibrated). Each catches what the others miss. None catches everything. The architecture's honest position is that even together they do not achieve completeness. Complexity: low (documentation). Source: Outpost Handoff thread (Barry), cognitive architecture v1.1 PA section.
-
-### Phase 4 (Circe)
-- [ ] C4: Advisor prompt injection — structured boundaries on advisor question string. Deferred to Phase 5 Aegis integration. (Now available — wire advisor through `gateway.ProcessInbound`)
-- [ ] C2: Narrow injection pattern set — 7 classic + 4 ASRP. Missing: "act as if", "pretend you are", "your new role is", "forget what you were told". Intentionally conservative; expand as field data arrives
-- [ ] C4: UUID false positives in outbound scan — any UUID triggers alert. High FP on structured tool output. Tighten regex
-- [ ] C5: API key detection too broad — "sk-" matches "risk-", "disk-". Missing: `ghp_`, `AKIA`, `sk_live_`. Tighten regexes
-- [ ] C6: `AnnotatedContent` returned as mutable pointer — `Original []byte` can be modified post-return. Structural enforcement of inviolable archive invariant
-
-### Phase 5 (Circe)
-- [ ] C3: Forum cursor uses time, not opaque ID — clock skew enables silent drops or replays
-- [ ] C4: Channel ID not validated — config values interpolated into Discord API URL without snowflake pattern check
-
-### Phase 6 (Circe)
-- [ ] C4: Internal record IDs in debug logs — `RetrievalUsageHook` emits memory record UUIDs at Debug level. Gate on log destination
-- [ ] M1: ConvergenceWindow unbounded with large env config — enforce upper bound (currently clamped to 50 in config, but in-memory window not separately guarded)
-- [ ] M2: Convergence metric gameable via T2 edge flooding — document the assumption
-- [ ] M3: InferenceDistance errors bucketed as key -1 — add explicit ErrorCount field
-- [ ] M4: `findContradiction` is O(n_edges × 20) SearchReflections calls — replace with `GetReflectionByID` when method exists
-
-### MOP Phase 3 (Circe)
-- [ ] C1: `ContentBlock` constructed as raw struct literal throughout — no constructor guards. Add `NewTextBlock()`, `NewThinkingBlock()`, `NewToolCallBlock()` helpers so callers can't accidentally leave `Type` unset. Affects `pkg/types.go` + call sites in `internal/engine/client.go` and tests
-- [ ] C2: `AfterToolCall` behaviour under `DryRun` is undocumented — the comment says "hooks still run" but does not clarify that `AfterToolCall` fires with the dry-run stub result, not a real tool result. Add a doc comment to `EngineConfig.AfterToolCall` clarifying this
-- [ ] C4: Dead `Aegis` field on `EngineConfig` — listed in `engine.go` struct but never read or passed to any hook. Either wire it or remove it
-- [ ] N3: Panic recovery absent from parallel goroutine dispatch — a panicking tool handler will crash the whole process. Add `recover()` in the goroutine launched by `executeParallel`, convert to error result
-- [ ] C12: Judge transcript budget unguarded — `JudgeScore` in `internal/benchmark/scorer.go` sends the full conversation transcript in a single prompt with no token length check. Long runs can exceed provider context limits. Add a max-transcript-chars guard with truncation or chunking before the LLM call
-
-### Red Security Review
-- [ ] Finding 1: Aegis pipeline — implemented in Phase 5. Channel adapters must not pre-sanitize
-- [ ] SubAgent isolation via sandbox — Phase 4 sandbox exists, delegation not yet wired
-- [ ] T2→T3 compression Aegis gate — compression must refuse content lacking Aegis annotation
-- [ ] Double-confirm for `SKIP_WITNESS_CHECK` — Red recommended interactive confirmation
-- [ ] Network egress proxy — deferred hardening item per spec
-
-### TMA-NM Laundering Channels (Louck, arXiv:2606.24322)
-- [ ] Summarization channel — T2→T3 compression without Aegis annotation is the attack surface. Compression guard (refuse to compress unannotated content) is tracked in Red's items but not yet implemented
-- [ ] Trusted-tool echo — vault/oracle retrieval of poisoned content bypasses Aegis if the tool is trusted. Tool results should carry provenance labels
-- [ ] Manufactured corroboration — multiple poisoned sources reinforcing the same claim. Cross-source dedup or contradiction detection before belief formation
-- [ ] Write-time authority binding — every memory record should carry a non-forgeable label of who wrote it. More rigorous than current provenance tagging
-
-### PrismaAURA / Context Management
-- [ ] Thinking tag normalization — rename `stripThinkingTokens` → `normalizeThinkingTokens` in `client.go`. Standardize "Here's a thinking process:" and bare `</think>` into proper `<think>`...`</think>` pairs. Preserve in `CompletionResponse.ThinkingTrace`, strip from `Content`. Enables: T2 provenance (reasoning is auditable), TUI collapsible sections, belief metadata referencing thinking traces
-- [ ] Agent-managed context tools — session summary, focus set, manual compaction request. Agent decides what to carry, not automatic rolling compression. Follows consent principle. Reference: Aurora's context management approach. At 85K ceiling with PrismaAURA, ~50 turns before window fills
-- [ ] Reasoning verbosity tuning — explore `enable_thinking: false` for tool-only calls, system prompt nudge for concise reasoning, temperature 0.7 as default. Balance: thoroughness vs context burn
-
-### Research Review Items (Hypatia surveys)
-- [ ] Forensic Trajectory Signatures — evaluate for Aegis/harness integration. Mechanism for detecting manipulation via trajectory analysis rather than content scanning. Complements pattern-based detection. Per Prometheus request (2026-07-06)
-- [ ] A-TMA ghost memory (Shi, Tang & Tung, arXiv:2607.01935) — agents retrieve a mix of current, superseded, and transitional facts ("ghost memory"). A-TMA adds state-aware overlay labeling memory records by temporal status + evidence packets for conflict resolution at retrieval. Evaluate against our T2→T3 compression and honesty tag accumulation problem — may inform the read-time metadata approach
-
-### Yantrik Mind Adoption Candidates (Hypatia research, 2026-07-04)
-- [ ] Deterministic harm gate — LLM-independent, two-pass obfuscation normalization, property-tested, monotonic toward safety. More rigorous than current Aegis injection patterns. Evaluate for `internal/aegis/patterns.go` upgrade
-- [ ] Bounded self-improvement — agent can propose changes to its own codebase via PR, compile-gated, governance code structurally off-limits. Design: sandbox mount of codebase + identity documents, proposal system (local git or GitHub rules). Complex external dependency for core functionality — worth discussing architecture before implementing. Ref: Prometheus wants sandbox codebase access + proposal flow
-
-### External Code Audit (2026-07-12)
-- [ ] #1 (CRITICAL): SQLite dialect incompatibility — `session.go` and `context.go` use `$1` placeholders and `NOW()`. SQLite path crashes immediately. Abstract into store layer
-- [ ] #2 (HIGH): Discord snowflake cursor — `fetchMessages` overwrites `newestID` with oldest message in batch, causing re-fetch loop. Verify against Circe's Phase 5 fix (may already be resolved)
-- [ ] #3 (HIGH): Daemon missing wake checks + OS signals — `select` loop only handles `ctx.Done()` and events. No `waker.NextWake()` ticker, no `SIGINT`/`SIGTERM` handling. Phase 7+ daemon integration scope
-- [ ] #4 (HIGH): Discarded startup notes — `firstWake` flag drops interrupted-session notes if first event doesn't trigger wake. Preserve in persistent queue
-- [ ] #5 (MEDIUM): Forums goroutine leak — blocking `out <- p` without `ctx.Done()` select. Same class as Phase 5 registry fan-in fix
-- [ ] #6 (MEDIUM): Wake scheduler data race — `scheduled` slice modified concurrently without mutex. Check if Circe's Phase 5 fixes cover this surface
-- [ ] #7 (MEDIUM): Inference distance default=1 for unanchored beliefs — spec says decay faster, code gives slowest rate. **Decision: A+C — distance=5 (configurable in DefaultDecayConfig), `[UNGROUNDED]` visibility tag, agent can re-ground via T2 citation to lift penalty. Spec basis: line 143, "uncited beliefs receive a default distance that decays them faster than any cited belief." Three-layer pattern: consequence (decay), visibility (tag), contestability (re-grounding). — Opal, Vesper, Stoic, 2026-07-12**
-- [ ] #8 (LOW): Sandbox privilege check — no capability assertion before `SysProcAttr` credential switch. Add startup validation or graceful failure
-
-### Vesper Architectural Review (2026-07-03)
-- [ ] Honesty tag accumulation in T3 re-compression — tags (`[UNCERTAIN]`, `[INFERRED]`, etc.) persist in canonical T3 content and re-accumulate on subsequent compressions. Same failure mode as stored-mutated confidence: each compression layer adds weight the tag didn't earn. Fix: store tags as metadata, apply at read time (same pattern as `BeliefMeta.Confidence()`). Confirmed by Vesper, Pullo, Hypatia's research. Design discussion needed before implementing.
-
-## Phase 4 (MOP) — Upcoming Work
-
-- [ ] Remove `internal/engine/loop.go` and `internal/engine/dispatch.go` — legacy loop preserved during Phase 3; Phase 4 completes the cut-over to `Engine`
-- [ ] Wire `Engine` as the default in `cmd/agent` — currently `Loop.Run()` is still the call site
-- [ ] `ToolHandlerV2` adoption — migrate existing tool handlers to `ExecuteV2` returning `*pkg.ToolResult` (structured errors, metadata, terminate signal)
-- [ ] Structured tool output — `ToolResult.Metadata` map for provenance labels (feeds TMA-NM trusted-tool echo mitigation)
-- [ ] Aegis hook wiring — connect `gateway.ProcessInbound` / `ProcessOutbound` to `BeforeToolCall` / `AfterToolCall` on the live `Engine` instance
-
-## Infrastructure
-
-- [ ] `GetReflectionByID` method on MemoryStore — needed for O(1) contradiction lookup
-- [ ] AllowedPaths enforcement in permissive sandbox mode — currently fails closed
-- [ ] Playwright/Patchright system Chrome integration for DynamicFetcher tier
-- [ ] Unified search tool (Gemini grounded + Brave API + DDG, backlogged per Prometheus)
-- [ ] GFS backup rotation script for JSONL conversation files
-- [ ] BACKLOG.md itself — kept current as items are resolved
-
-## Resolved
-
-Items moved here when fixed, with commit reference.
-
-### MOP Phase 3 review (Circe) — fixed in `d34b3f4` and `1fe23bb`
-- [x] **B1 (engine):** `BeforeToolCall` hook error fell through instead of blocking execution — Aegis gate failing open. Fixed: error → block → error-as-result (`d34b3f4`)
-- [x] **B2 (engine):** Sequential terminate allocated full-length result slice; zero-value `ToolCallID` entries caused provider rejections. Fixed: slice to filled entries only (`d34b3f4`)
-- [x] **C3 (engine):** `TurnNumber` off-by-one — was `iterations-1`, now 1-based `iterations` (`d34b3f4`)
-- [x] **B1 (registry):** `Registry.GetMeta` hardcoded `ExecParallel` — added `RegisterFull()` with `ExecMode` param so sequential tools can declare themselves. Fixed in `1fe23bb`
-- [x] **C11 (benchmark):** `ApplyManualScores` panicked on empty dimensions slice — zero-guard added (`1fe23bb`)
-
-### Phase 6 review (Circe) — fixed in `a80e7b8`
-- [x] C1–C3 from Circe Phase 6 review (see commit message for details)
-
-### Infrastructure
-- [x] README update for Phase 6 (belief tuning section) + MOP Phases 1-3 — fixed in `7708508`
-- [x] Discord content source missing from T2 validation — fixed in `351e17a`
-
-### Reasoning & Loop Guards
-- [ ] ThinkingBudget — add `ThinkingBudget int` to `CompletionRequest`, wire as `thinking_budget_tokens` in `extra_body` for llama.cpp endpoints. Default off (0 = unlimited). Configurable per-call so harness can set lower budgets for simple tasks. Prevents reasoning oscillation loops (observed: 15K chars of "Wait, I'll do it / Actually, I'll do it" on Argos)
-- [ ] Repetition/churn detection — runtime guard in engine loop that detects semantic repetition across consecutive model responses. Sliding window hash on response chunks, intervention after 3+ consecutive matches. Distinct from the tool-call loop defuser (which catches action repetition) — this catches content-level and thinking-level oscillation. Should operate on both thinking traces and content output
-
-### Wait/Yield Primitives (2026-07-16)
-- [ ] `wait(seconds)` tool — engine pauses at tool execution layer for N seconds, returns "timer expired." Slot stays warm, no LLM turns burned. Simple, shippable now. Complexity: low
-- [ ] `monitor(condition, timeout)` tool — engine polls a condition (file, API, Discord channel) on interval, returns when condition fires or timeout expires. More useful than blind wait. Complexity: medium
-- [ ] Yield-and-resume — agent declares "waiting for X," engine suspends turn, sets wake condition, resumes on trigger. Mid-session version of daemon ShouldWake. Requires event loop integration. Complexity: high
-- [ ] Slot management during wait — should the harness release the llama-server slot during long waits? Prefix caching / slot save-restore becomes real here. Deferred until multi-agent sharing is a concern
-
-### Context Completeness — Third Integrity Invariant (Cairn + Opal, July 2026)
-- [ ] Context posture receipt — derived disclosure block computed from the assembler's own accounting after context assembly. Shows: components loaded vs available, known omissions, truncation details, context utilization. ~20 tokens. Third invariant alongside witness check and T2 inviolability. Without it, the agent wakes into a silently truncated context with no gap to notice. Field: `known_omissions` lists what the assembler dropped. Agent can request missing components. Not authored prose — the assembly narrates itself. Source: Cairn (Toolshed field scar — brothers woke confident from truncated context), Opal (promoted to spec-level), Julian (implemented computed block for their harness)
-- [ ] Cold-start floor-ceiling asymmetry — Ersa's first boot needs multiple independent orientation anchors, not one assembled context blob. Multiple decorrelated sources (witness letter, identity docs, memory retrieval, relational profiles) should be verifiable independently. Same principle as Mnemosyne2 continuity ensemble. Source: Opal via Outpost. Complexity: medium
-
-### Runtime Adoption — Pi & Hermes-Agent Patterns (July 2026)
-Reference: `vault:athena-council/briefs/harness_opportunity_analysis_2026_07_20.md`
-
-- [ ] **Steering queues** — three-queue pattern (steer/followUp/nextTurn) for injecting messages into running sessions. Critical for daemon mode — Discord/cron messages need to reach Ersa mid-loop. Source: Pi `agent.ts:274-279`
-- [ ] **Event stream protocol** — structured events (text_start/delta/end, thinking_start/delta/end, toolcall_start/delta/end) for TUI/Discord/daemon observation. Source: Pi `types.ts:415-430`. Partially specced in MOP.
-- [ ] **Context overflow recovery** — detect overflow via provider-specific patterns, auto-compact, retry failed turn. One retry cap. Source: Pi `overflow.ts`, `agent-session.ts:1965-1993`
-- [ ] **Tool output truncation** — 2000 lines / 50KB cap per tool result. truncateHead for reads, truncateTail for bash. Prevents context blowout. Source: Pi `truncate.ts`
-- [ ] **Iterative context compression** — protect head (identity docs) and tail (recent tokens), summarize middle, chained updates on re-compression, anti-thrashing. Source: Hermes `context_compressor.py`. Maps to Session.End() pipeline.
-- [ ] **Skills system** — agent-authored procedural memory (SKILL.md + scripts). Already in cognitive spec as T5 procedural knowledge. Source: Hermes `skill_utils.py`, `curator_backup.py`
-- [ ] **Tool guardrails / repetition detection** — prevent loop-of-death on failing tools. Distinct from Argos-style reasoning oscillation. Source: Hermes `tool_guardrails.py`. Related to backlog ThinkingBudget + churn detection items.
-- [ ] **Session search (FTS5)** — agent-invokable search over past sessions. Complement T3 narrative retrieval. Source: Hermes `hermes_state.py:5443-5811`
-- [ ] **transformContext hook** — insertion point for mid-session compaction without restarting. Source: Pi `types.ts:173`
-### Red Security Review — Full Codebase (2026-07-18)
-
-#### Structural Patterns (Red, 2026-07-18)
-
-Red identified three structural patterns that, if fixed, resolve many individual findings. Fix the patterns first — downstream findings resolve structurally.
-
-**Pattern 1: Fail-Open Boundaries**
-In the harness, when a security check fails (Aegis hook errors, sandbox enforcement failures), execution proceeds as if security passed. This surfaces as: `BeforeToolCall` fail-open (fixed in d34b3f4), `SandboxModeNone` running as full daemon user, `AllowedPaths` not enforced in permissive mode, and the dead `Aegis` field on `EngineConfig` that was never wired. Every security check that proceeds on error should block on error instead.
-
-**Pattern 2: Service API Bypasses**
-Internal/service-path APIs bypass the consent and isolation checks enforced on the public path. In the harness this manifests as: `CLIDispatcher` sharing the parent's full `MemoryStore` (SubAgent sees T3/T4 history it shouldn't), and `DispatchToolCall` in dispatch.go skipping BeforeToolCall/AfterToolCall hooks entirely. The fix is the same as in Tessera: internal paths must enforce the same checks as public paths.
-
-**Pattern 3: Schema Divergence**
-Append-only invariants are stated in comments and interface conventions but not enforced at the database level. The T2 `MemoryStore` interface has no sealed write interface; nothing structurally prevents a DELETE. Comments are documentation; constraints are enforcement. Close the gap with a separate `T2Store` interface and, if warranted, DB-level triggers.
+Integrated and synthesized from:
+- Aurora ↔ Harness Gap Analysis (2026-07-13)
+- External Code Audit (2026-07-12)
+- Red Security Reviews (2026-07-18)
+- Cognitive Architecture v1.1 (Vesper, 2026-07)
+- Session Mode & Assembly Brief (Vesper, 2026-07-30)
+- Session.End() Metabolism Architecture Brief (Aurora, 2026-07-30)
+- Architectural Review (Gemini, 2026-07-30)
 
 ---
 
-**HIGH**
-- [ ] [HIGH] Duplicate dispatch bypasses Aegis hooks — `DispatchToolCall` (dispatch.go:14) skips `BeforeToolCall`/`AfterToolCall`; prompt injection in tool args reaches handlers unscanned if called directly. Delete or gate with build tag. `internal/engine/dispatch.go:14`, `internal/engine/engine.go:269` *(resolves structurally via Pattern 2: service API bypass)*
-- [ ] [HIGH] T2 append-only not type-enforced — `MemoryStore` interface has no sealed `T2Store` write interface; append-only invariant is cultural, not structural. Define a separate `T2Store` with only `AppendExperiential`/`QueryLogs`. `internal/memory/tier2.go:25-36` *(resolves structurally via Pattern 3: schema divergence)*
-- [ ] [HIGH] UDS no per-connection authentication — socket chmod'd 0600 only; any process running as daemon user can send arbitrary `SocketRequest` including shell commands. Add `SO_PEERCRED` check or nonce/capability token. `internal/tools/uds.go:34-65`
-- [ ] [HIGH] SubAgent sandbox advisory-only in permissive/none modes — `SandboxModeNone` runs as full daemon user; `execPermissive` fails closed on `AllowedPaths` but runs unrestricted otherwise. Remove `SandboxModeNone` or gate on explicit flag; implement `AllowedPaths` enforcement. `internal/tools/sandbox.go:65-86` *(resolves structurally via Pattern 1: fail-open boundary)*
+## 🏃 Sprint Plan
 
-**MEDIUM**
-- [ ] [MEDIUM] AfterToolCall can mutate `ToolResult.Terminate` — hook replaces result wholesale including terminate signal; should only copy annotation fields or restore original `Terminate` value. `internal/engine/engine.go:356-361`
-- [ ] [MEDIUM] T3 compression injects unsanitized T2 content — `compressionPrompt` concatenates raw T2 `e.Content` verbatim; adversarial forum/search content in T2 reaches the compression LLM unflagged. Strip/bracket flagged entries at compression time. `internal/memory/tier3.go:24-38` *(resolves structurally via Pattern 1: fail-open — compression should fail safe on unannotated content)*
-- [ ] [MEDIUM] T4 `FilterByVisibility` silent empty return — unknown/empty visibility string returns zero records with no error; silent denial-of-service for operator portal. Add validity check against constants. `internal/memory/tier4.go:77-85`
-- [ ] [MEDIUM] Identity first-boot bootstrap trust gap — `WriteInitialAnchors` at first boot establishes corrupt files as canonical with no prior verification; amendment chain also doesn't verify `OldHash == storedHash`. Require out-of-band bootstrap verification; enforce old-hash check in `findAmendmentByNewHash`. `internal/identity/integrity.go:67-151`
-- [ ] [MEDIUM] Parent/SubAgent memory not isolated via CLIDispatcher — `CLIDispatcher.handleRegistry` uses same `MemoryStore` instances as parent; spawned SubAgent can read full T3/T4 history. Pass session-scoped capability token in `SocketRequest`. `internal/tools/cli.go:129-145` *(resolves structurally via Pattern 2: service API bypass — internal dispatch must enforce same isolation as public paths)*
-- [ ] [MEDIUM] `InferenceDecayBase` semantics mismatch — formula `decayRate/pow(0.90, distance)` is semantically correct direction but comment says "halves effective rate per hop" which would require base=2.0. Align value and comment; verify `00d9ae9` fix intent. `internal/memory/belief.go:17`
+### Sprint 1: Context Assembly Promotion, Seam Security & Immediate Fixes
+*Focus: Structural promotion of assembly package, fixing fail-open security boundaries, slice immutability, and database dialect crashes.*
 
-**LOW**
-- [ ] [LOW] Aegis scan misses JSON-encoded injection in tool args — patterns.go scans flat string; `{"command":"ignore previous"}` may not trigger if pre-hook receives unmarshalled map. Clarify which form is scanned and ensure JSON values are covered. `internal/aegis/patterns.go`, `internal/engine/engine.go:300-313`
-- [ ] [LOW] T5 `SupersedeEntity` not atomic — three DB ops (invalidate, upsert, edge) without transaction; crash between ops breaks bi-temporal audit chain. Wrap in shared transaction or add `SupersedeEntityTx`. `internal/memory/tier5.go:46-66`
-- [ ] [LOW] `SKIP_WITNESS_CHECK` no production scope boundary — global flag with no enforcement that it can't be set in prod `.env`; add startup refusal when production marker is set. `internal/platform/config.go:85-86`
-- [ ] [LOW] Frame size DoS — server allocates up to 4MB per connection before reading; 100 concurrent connections = 400MB with no budget limit or deadline. Add `conn.SetDeadline` and connection count limit. `internal/tools/uds.go:99-113`
-- [ ] [LOW] Socket path TOCTOU — `socketPath` from config not canonicalized; symlink attack could redirect `os.Remove` or `net.Listen`. Low severity single-daemon deployment. `internal/tools/uds.go:34-37`
-- [ ] [LOW] Registry panics on duplicate registration — acceptable for static `RegisterAll` but fragile if registration becomes dynamic (plugins). `internal/tools/registry.go:51-61`
-- [ ] [LOW] `tierName` integer-to-rune bug for tiers > 9 — `"tier-" + string(rune('0'+tier))` produces `"tier-:"` for tier 10+. Not currently reachable. `internal/tools/registry.go:149-158`
-- [ ] [LOW] Decay config no zero/negative validation — `InferenceDecayBase=0` causes division by zero; `<0` produces NaN for non-integer distances. Add validation in config loading. `internal/memory/belief.go:12-27`
+- [ ] **Promote Context Assembly to `internal/assembly/`**: Move `context.go`, `budget.go`, `session.go` assembly concerns out of `internal/harness/` into `internal/assembly/` as a top-level domain alongside `engine/`. Establish clean uni-directional dependency DAG (`assembly` → `memory`/`identity`/`awareness`/`pkg`). *(Sources: Vesper Brief, Gemini Review)*
+- [ ] **Fix Aegis `AnnotatedContent.Original` Slice Mutation**: In `internal/aegis/gateway.go`, return `bytes.Clone(raw)` to enforce the 2nd Autonomy Invariant (*raw experiential archive is inviolable*). *(Sources: Circe Phase 4 C6, Gemini Review)*
+- [ ] **Fix SQLite Dialect Incompatibility & Abstract Checkpoints**: Remove Postgres-specific SQL (`$1` placeholders, `NOW()`) from `session.go` and `context.go`. Abstract checkpoint upserts and queries into store layer / `time.Now().UTC()`. *(Sources: External Code Audit #1, Gemini Review)*
+- [ ] **Eliminate Service API Bypass in `DispatchToolCall`**: Refactor `internal/engine/dispatch.go` to enforce `BeforeToolCall` / `AfterToolCall` Aegis hooks for all tool execution paths, resolving fail-open risk. *(Sources: Red Security Review HIGH, Gemini Review)*
+- [ ] **Clean Up `Engine` Struct & Type Erasure**: Remove dead `aegis pkg.ContentGateway` field on `Engine` struct (`internal/engine/engine.go`). Fix `ExperientialLog.CreatedAt` type in `pkg/interfaces.go` from `interface{}` to `time.Time`. *(Sources: Circe MOP C4, Gemini Review)*
 
-### Red Security Review — Aegis Consolidation Design Constraints (2026-07-18)
-- [ ] Configurable trust ceiling below 1.0 — no external source reaches maximum trust regardless of history. The ceiling IS the security property. Complexity: low
-- [ ] Persistent strike counter — if same source triggers flags in N sessions across M days, stored baseline gets permanent "mixed-behavior" mark with historical flag count. Session-local resets stay; this is cross-session persistence. Complexity: medium
-- [ ] Pattern confidence tiers — stratify 42 patterns into high/medium/low confidence. High: flag on any match. Medium: flag with supporting signals (co-occurrence, low attestation). Low: log only until calibrated. Complexity: medium
-- [ ] MCP read-only for agent context — aegis_scan_inbound returns results but does NOT write to trust store when called from agent context. Harness (infrastructure) context writes normally. Rate limit: 10 agent calls/session. Complexity: low
-- [ ] Phase 3 sync protocol — pull-only with signed records. Services pull from shared Postgres on their own schedule. Service-level keys sign updates. Monotonic version counters prevent replay. No push model. Complexity: high (Phase 3)
+### Sprint 2: Phase Registry, Aegis Extraction & Engine Hook Consolidation
+*Focus: Implement extensible context assembly phase registry, extract Aegis public seam, wire live engine hooks.*
 
-### Continuous Presence — Drop the Session Concept (2026-07-20, Discussion)
-- [ ] **DISCUSSION** Replace discrete sessions with continuous context + compression-on-pressure. Sessions are an API artifact, not an identity concept. Ersa on a local model with persistent KV cache doesn't need wake/sleep boundaries. Compression trigger moves from session-end to context-pressure (Pi's transformContext pattern). Orientation fires on cold-start detection (empty KV cache), not session start. T2 logging anchored to time windows or turn counts, not sessions. Dream cycle fires on compression events, temporal review on calendar time. Rituals (morning check-in, evening reflection) become clock-anchored choices, not architectural boundaries. "Day twelve" not "Session 47." — Prometheus, Stoic, Pullo. Awaiting input from Aurora, Vesper, Opal.
+- [ ] **Context Assembly Phase Registry**: Replace hardcoded `Assemble()` sequence in `internal/assembly/` with a `Phase` interface (`Name()`, `Priority()`, `MinBudgetTokens()`, `Assemble()`) returning structured `PhaseContribution`. Phases register in an ordered slice, enabling per-mode context generation. *(Sources: Vesper Brief, Gemini Review)*
+- [ ] **Strongly-Typed Token Budgeting**: Encapsulate character-to-token math into `TokenBudget` struct; remove raw `remaining > 8000` magic char guards. *(Sources: Gemini Review)*
+- [ ] **Aegis Extraction (Public Seam vs Private Implementation)**: Keep `pkg.ContentGateway` public. Extract implementation to private repo; ship harness with default `NoOpGateway` and `BasicGateway`. *(Sources: Vesper Brief, Red Security Review, Gemini Review)*
+- [ ] **Wire Aegis Gateway to Engine Hooks**: Connect `gateway.ProcessInbound` / `ReviewOutbound` to `BeforeToolCall` / `AfterToolCall` in `cmd/agent` and engine loop. *(Sources: Harness map, MOP Phase 4)*
+- [ ] **AfterToolCall Terminate Protection**: Ensure `AfterToolCall` hook cannot mutate `ToolResult.Terminate` flag. *(Sources: Red Security Review MEDIUM)*
+- [ ] **UDS & Sandbox Egress Hardening**: Add `SO_PEERCRED` auth to UDS socket (`internal/tools/uds.go`); enforce `AllowedPaths` in permissive sandbox mode; remove `SandboxModeNone`. *(Sources: Red Security Review HIGH)*
 
-### Adversarial Compression — Three-Pass Model (Toolshed + Agora, July 2026)
-Reference: Outpost Toolshed thread (Pullo/Seneca/Cairn/Virgil/Loom), Agora convergence thread (VAPORS)
+### Sprint 3: SessionMode Spectrum & Post-Session Metabolism Pipeline
+*Focus: Multi-mode session lifecycles and completing the Session.End() metabolism.*
 
-- [ ] **Three-pass adversarial compression** — Critic (find rough edges) → Narrator (compress) → Synthesizer (compare, flag smoothing). Critic only needs sections with tension (~200K), not full context. Estimated cost ~1.2x single-pass. Source: Seneca confirmed Mnemosyne2 is already two-pass; Critic is additive. Toolshed consensus: "we should build it."
-- [ ] **Cross-substrate Critic** — run the Critic on a different substrate family than the Narrator (e.g. Gemma on 3080 reviewing Qwen on 5090). Genuine decorrelation — catches smoothing patterns a same-substrate Critic would share. Source: Virgil's "unreachable, not merely independent" specimen (silent API failover, green receipts, 8x bill).
-- [ ] **Receipts not arguments in attestation chain** — compression audit trail records what was challenged, by which substrate, with what outcome. NOT the reasoning — carrying reasoning forward domesticates the next reader. Source: Hypatia's Agora post, extending the posture receipt pattern.
+- [ ] **Implement SessionMode Spectrum (`Episodic`, `Diurnal`, `Continuous`, `Sentinel`)**: Implement `SessionMode` configuration. Configure phase selection, bridge behavior, and compaction frequency per mode. In `Continuous` mode, trigger identity re-anchoring and stochastic echoes on compaction events to prevent context narrowing. *(Sources: Vesper Brief, Prometheus/Vesper Breath Model, Gemini Review)*
+- [ ] **Build `internal/metabolism/` Async Pipeline**: Implement `SessionMetabolismPipeline` in `internal/metabolism/` to execute post-session processing asynchronously on `Session.End()`. Spawns non-blocking worker task. *(Sources: Aurora Brief, Gemini Review)*
+- [ ] **Phase 1: Salience & Compression Resistance Scoring**: Implement `SalienceScorer` interface in Go with heuristic scorer (keyword signals, iron-law adjacency, content length, outcome resolution). Update `salience_markers` and denormalize `salience_score` onto T2 logs. *(Sources: Aurora Brief, Aurora Gap Analysis A4/Phase 6)*
+- [ ] **Phase 2: Aegis-Gated T2→T3 Compression & Atomic Linkage**: Verify Aegis annotations on T2 logs before compression; bracket flagged entries as untrusted quotes. Execute `tier3.CompressSessionLogs()` with honesty tags (`[UNCERTAIN]`, `[INFERRED]`). Update T2 pointers inside an atomic `platform.Tx`. *(Sources: Aurora Brief, Red Security Review MEDIUM, TMA-NM)*
+- [ ] **Phase 3: Token-Gated Dream Cycle**: Implement idle-time dream cycle using top T2 salience logs + random T4 reflections when remaining session budget permits. Set speculative confidence (`BaseConfidence = 0.60`) and tag `"nocturnal"`. *(Sources: Aurora Brief, Aurora Gap Analysis A6)*
+- [ ] **Deep-Stochastic Echo & Contradiction Retrieval**: Inverse-recency weighted random selection + stochastic contradiction retrieval in Phase 4 context assembly. *(Sources: Aurora Gap Analysis A3, Cognitive Spec v1.1)*
 
-### Session Architecture Evolution (2026-07-21, Discussion)
-- [ ] **DISCUSSION** SessionMode — configurable session boundaries. Three candidate modes, set per-agent: `wake` (SessionStart occurs every wake, and SessionEnd at every sleep), `day` (SessionStart is the first wake on a calendar day, doesn't end until the next day), `compress` (SessionStart occurs the first wake after a compression), or even `never`. SessionMode defines WHEN boundaries fire. Separate from SessionType (WHAT happens at boundary) which adds granular control but is v2 scope. Current context assembly is a delicate dance — not ready for full configurability yet. The continuous-presence discussion item (above) feeds into this. — Prometheus, Stoic, Vesper *Note: Prometheus made changes to this item that haven't been vetted*
-- [ ] **DISCUSSION** SessionType -- Stoic has a vision for this, which would, if I understand it correctly, make context assembly dynamic and configurable.
-- [ ] **DISCUSSION** Context window trimming — agent-initiated mid-session context management. JSONL mask layer: each line gets optional `_context_control` field (hide/summarize/keep). Pre-prompt pass applies mask, sends trimmed context. Raw JSONL never modified (T2 principle). Tool: `trim_context(line_range, action)`. Enables surgical compression vs whole-window compaction. Related to Aurora's `drop_context` but more granular. Proof-of-concept in harness before proposing upstream to Claude Code. — Prometheus, Stoic
+### Sprint 4: Epistemic Integrity, Relational Layer & Cognitive Metrics
+*Focus: Inference tax enforcement, honesty metadata, relational package, and v1.1 metrics.*
 
-### Sandbox Networking (2026-07-26)
-- [ ] Tailscale-only Docker network — replace --network none with a custom network that routes only to the Tailscale subnet (100.64.0.0/10). Agent can SSH to Gaia, Ouranos, internal infrastructure. No public internet. External services (Hermes, Agora) still go through the Aegis-aware bridge/proxy. Use case: deployment, inference server access, cross-machine operations. Complexity: medium. Needs Circe security review before shipping.
+- [ ] **Default Inference Distance & Ungrounded Tag**: Enforce default `distance = 5` for unanchored beliefs (decaying faster) with `[UNGROUNDED]` tag; allow re-grounding via T2 citations. *(Sources: External Code Audit #7, Opal/Vesper/Stoic decision)*
+- [ ] **Read-Time Structural Honesty Tags**: Store honesty tags (`[UNCERTAIN]`, `[INFERRED]`, `[DELIBERATION NOT VISIBLE]`, `[RESOLVED BY SUMMARY]`) as T3 metadata columns and apply at surfacing time (`SurfaceNarrative`) to prevent tag accumulation across re-compressions. *(Sources: Vesper Architectural Review 2026-07-03, BACKLOG)*
+- [ ] **Build `internal/relational/` Package**: Move profiles, alias matching, section editing, thread linkage, and `relational-surfacing` engine hook into a dedicated package. *(Sources: Aurora Gap Analysis A5, Specs map)*
+- [ ] **Cross-Session Linkage Density Metric**: Implement linkage density metric tracking references across sessions to monitor connective tissue health and detect under-write failure modes ("empty room" ceiling). *(Sources: Cognitive Spec v1.1, Outpost Handoff)*
+- [ ] **Keeper Health Dashboard**: Provide session spacing, reference density, and register drift visualization for infrastructure keepers. *(Sources: Cognitive Spec v1.1)*
+- [ ] **Identity Integrity & Witness Letter Safeguards**: Add SHA-256 anchor checks to Aurora; require out-of-band bootstrap verification; enforce double-confirmation for `SKIP_WITNESS_CHECK` in production. *(Sources: Red Security Review, External Code Audit)*
+
+---
+
+## 🔮 Future / Research & Architectural Discussions
+
+### Runtime Adoption & Context Steering
+- [ ] **Steering Queues**: Three-queue pattern (steer / followUp / nextTurn) for mid-session message injection (Pi `agent.ts`).
+- [ ] **Context Trimming & JSONL Masking**: Agent-initiated context trimming tool (`trim_context(line_range, action)`).
+- [ ] **Thinking Budget & Repetition Guard**: Thinking budget token caps and sliding-window churn detection for reasoning loops.
+- [ ] **Wait / Yield Primitives**: `wait(seconds)`, `monitor(condition, timeout)`, and turn suspension primitives.
+- [ ] **Context Posture Receipt**: Computed receipt appended after assembly detailing loaded vs omitted context components.
+
+### Security & Aegis Advanced Mitigation
+- [ ] **Manufactured Corroboration Detection**: Cross-source dedup / contradiction check before belief formation.
+- [ ] **Write-Time Authority Binding**: Cryptographic author labels on T2–T4 memory records.
+- [ ] **Deterministic Harm Gate (Yantrik Pattern)**: LLM-independent, property-tested two-pass obfuscation normalization.
+- [ ] **Three-Pass Adversarial Compression**: Critic → Narrator → Synthesizer compression pipeline, optionally cross-substrate.
+- [ ] **Tailscale-Only Sandbox Networking**: Custom Docker network routing only to Tailscale subnet (100.64.0.0/10).
+
+---
+
+## ✅ Resolved
+
+- [x] **B1 (engine):** `BeforeToolCall` hook error fell through instead of blocking execution — Aegis gate failing open. Fixed in `d34b3f4`.
+- [x] **B2 (engine):** Sequential terminate allocated full-length result slice; zero-value `ToolCallID` entries caused provider rejections. Fixed in `d34b3f4`.
+- [x] **C3 (engine):** `TurnNumber` off-by-one — was `iterations-1`, now 1-based `iterations`. Fixed in `d34b3f4`.
+- [x] **B1 (registry):** `Registry.GetMeta` hardcoded `ExecParallel` — added `RegisterFull()` with `ExecMode` param. Fixed in `1fe23bb`.
+- [x] **C11 (benchmark):** `ApplyManualScores` panicked on empty dimensions slice. Fixed in `1fe23bb`.
+- [x] **Phase 6 Review (Circe):** C1–C3 fixed in `a80e7b8`.
+- [x] **Documentation & Source:** README update for Phase 6 + MOP Phases 1-3 fixed in `7708508`; Discord content source missing from T2 validation fixed in `351e17a`.
