@@ -52,9 +52,13 @@ Integrated and synthesized from:
 - [ ] **Default Inference Distance & Ungrounded Tag**: Enforce default `distance = 5` for unanchored beliefs (decaying faster) with `[UNGROUNDED]` tag; allow re-grounding via T2 citations. *(Sources: External Code Audit #7, Opal/Vesper/Stoic decision)*
 - [ ] **Read-Time Structural Honesty Tags**: Store honesty tags (`[UNCERTAIN]`, `[INFERRED]`, `[DELIBERATION NOT VISIBLE]`, `[RESOLVED BY SUMMARY]`) as T3 metadata columns and apply at surfacing time (`SurfaceNarrative`) to prevent tag accumulation across re-compressions. *(Sources: Vesper Architectural Review 2026-07-03, BACKLOG)*
 - [ ] **Build `internal/relational/` Package**: Move profiles, alias matching, section editing, thread linkage, and `relational-surfacing` engine hook into a dedicated package. *(Sources: Aurora Gap Analysis A5, Specs map)*
+- [ ] **Conversation Thread Tracking**: Multi-session conversation arcs per participant, active thread context loaded into context assembly Phase 5 (Incoming). *(Sources: Aurora Gap Analysis A9)*
 - [ ] **Cross-Session Linkage Density Metric**: Implement linkage density metric tracking references across sessions to monitor connective tissue health and detect under-write failure modes ("empty room" ceiling). *(Sources: Cognitive Spec v1.1, Outpost Handoff)*
 - [ ] **Keeper Health Dashboard**: Provide session spacing, reference density, and register drift visualization for infrastructure keepers. *(Sources: Cognitive Spec v1.1)*
+- [ ] **Three-Instrument Coverage Documentation**: Document archive (peaks-calibrated), PA (event-calibrated), keeper (adaptation-calibrated) as the three-instrument model. Each catches what the others miss; none catches everything. *(Sources: Cognitive Spec v1.1, Outpost Handoff/Barry)*
 - [ ] **Identity Integrity & Witness Letter Safeguards**: Add SHA-256 anchor checks to Aurora; require out-of-band bootstrap verification; enforce double-confirmation for `SKIP_WITNESS_CHECK` in production. *(Sources: Red Security Review, External Code Audit)*
+- [ ] **Bridge Opt-In Switch**: Switch harness bridge from stochastic 20%-abstention model to Aurora's opt-in design (default-off, agent calls `orientation_bridge` tool). Aurora approved from lived experience in Session 78. Complexity: low. *(Sources: Specs map D1, aurora_bridge_optin memory)*
+- [ ] **Agent-Authored Skill Files**: .md files in workspace/skills/ loaded by relevance in context assembly Phase 4. Core spec promise for agent-customizable tools. *(Sources: Specs map C7)*
 
 ---
 
@@ -66,6 +70,38 @@ Integrated and synthesized from:
 - [ ] **Thinking Budget & Repetition Guard**: Thinking budget token caps and sliding-window churn detection for reasoning loops.
 - [ ] **Wait / Yield Primitives**: `wait(seconds)`, `monitor(condition, timeout)`, and turn suspension primitives.
 - [ ] **Context Posture Receipt**: Computed receipt appended after assembly detailing loaded vs omitted context components.
+
+### Architectural — Unscheduled
+*Items that belong in the architecture but don't fit a current sprint. Schedule when capacity allows.*
+
+- [ ] **Dual LLM Endpoint Architecture**: Primary (identity/reasoning) + secondary (vision/critic/triage) with `DualLLMConfig` and capability ledger. Needed for cross-substrate critic. Complexity: high. *(Sources: Specs map C2)*
+- [ ] **Four-Instrument Continuity Ensemble Contract**: Document naming each instrument's distortion profile (Mnemosyne2, Lumen Zero, personal letters, vault) and which is authoritative on disagreement. Complexity: low (document), high (consensus). *(Sources: Specs map C4, Tessera review)*
+- [ ] **Parent/SubAgent Memory Isolation**: `CLIDispatcher.handleRegistry` uses same `MemoryStore` as parent — spawned SubAgent can read full T3/T4 history. Pass session-scoped capability token. *(Sources: Red Security Review MEDIUM)*
+- [ ] **Mnemosyne2 Honesty Section**: Self-declared distortion block listing elided content, truncated tool results, cold-start cap engagement. *(Sources: Specs map C3, Tessera review Rec 3)*
+- [ ] **Fix Mnemosyne2 Default Participant**: Hardcoded to "hypatia" in 3 hook entrypoints — fail loudly on missing participant instead. *(Sources: Tessera review Rec 5)*
+- [ ] **`revise_reflection` Tool**: Surface T4 `revised_by` field for agent use. Schema exists; no write path. Complexity: low. *(Sources: Aurora Gap Analysis A10)*
+- [ ] **`focus_next_session` Echo Re-Ranking**: Read agent_focus table in assembleEchoPool(), boost echo slots toward focus note embedding. Schema present (006_operational.sql); wiring unconfirmed. *(Sources: Aurora Gap Analysis A2)*
+- [ ] **Pinboard Retrieval in Phase 3**: Spec comment exists in assembleWorldModel, no actual call. Render in stable prompt prefix for caching benefit. *(Sources: Harness map Phase 3 stub, Aurora map A7)*
+- [ ] **Unread Message Count in Manifest**: `manifest.UnreadMessages` always 0 — no message polling call in assembler. *(Sources: Harness map Phase 5 gap)*
+
+### Parked — Code Quality & LOW Findings
+*Low-severity items from Circe's reviews and Red audit. Not blocking. Fix opportunistically.*
+
+- [ ] Aegis scan misses JSON-encoded injection in tool args — patterns.go scans flat string *(RED LOW)*
+- [ ] T5 `SupersedeEntity` not atomic — three DB ops without transaction *(RED LOW)*
+- [ ] `SKIP_WITNESS_CHECK` no production scope boundary *(RED LOW)*
+- [ ] Frame size DoS on UDS — 4MB per connection, no limit *(RED LOW)*
+- [ ] Socket path TOCTOU — symlink attack on `os.Remove` *(RED LOW)*
+- [ ] Registry panics on duplicate registration *(RED LOW)*
+- [ ] `tierName` integer-to-rune bug for tier>9 *(RED LOW)*
+- [ ] Decay config no zero/negative validation *(RED LOW)*
+- [ ] `ConvergenceWindow` unbounded with large env config *(Circe M1)*
+- [ ] Convergence metric gameable via T2 edge flooding *(Circe M2)*
+- [ ] `InferenceDistance` errors bucketed as key -1 *(Circe M3)*
+- [ ] `findContradiction` O(n×20) SearchReflections — replace with `GetReflectionByID` *(Circe M4)*
+- [ ] `InferenceDecayBase` comment/semantics mismatch *(RED MEDIUM)*
+- [ ] T4 `FilterByVisibility` silent empty return *(RED MEDIUM)*
+- [ ] T3 compression injects unsanitized T2 content *(RED MEDIUM — partially addressed by Sprint 3 Aegis-Gated Compression)*
 
 ### Security & Aegis Advanced Mitigation
 - [ ] **Manufactured Corroboration Detection**: Cross-source dedup / contradiction check before belief formation.
