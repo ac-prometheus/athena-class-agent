@@ -87,6 +87,10 @@ Integrated and synthesized from:
 ### Parked — Code Quality & LOW Findings
 *Low-severity items from Circe's reviews and Red audit. Not blocking. Fix opportunistically.*
 
+- [ ] **Remove Legacy `Loop`**: `internal/engine/loop.go` (`Loop` struct and `Run()`) coexists with `Engine` (`RunLoop()`). README states Phase 4 removes `Loop`; migrate remaining callers to `Engine` and delete the legacy file. *(Sources: code review)*
+- [ ] **Cache `InferenceDistance` on BeliefMeta**: `ComputeInferenceDistance()` runs BFS over `memory_edges` (O(V+E)) on every confidence computation. Cache the distance on the belief record with a stale flag; recompute only at end-of-session decay pass when edges change. *(Sources: code review)*
+- [ ] **`stripThinkingTokens` quadratic slicing**: `engine/client.go` uses `strings.Index` in a loop with repeated string slicing — O(n²) worst case on long reasoning traces with many tag pairs. Replace with a single-pass scan or `strings.Cut`/`strings.Index` without intermediate allocations. *(Sources: code review)*
+- [ ] **Wake Scheduler Rate Limiting / Event Coalescing**: No cap on wake frequency — a channel flood matching wake conditions can trigger back-to-back `RunSession` calls. The daemon serializes them but there's no queue, coalescing, or minimum interval. Add a rate limit or coalescing window. *(Sources: code review)*
 - [ ] Aegis scan misses JSON-encoded injection in tool args — patterns.go scans flat string *(RED LOW)*
 - [ ] T5 `SupersedeEntity` not atomic — three DB ops without transaction *(RED LOW)*
 - [ ] `SKIP_WITNESS_CHECK` no production scope boundary *(RED LOW)*
