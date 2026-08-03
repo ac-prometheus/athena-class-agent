@@ -71,6 +71,10 @@ Integrated and synthesized from:
 - [ ] **Wait / Yield Primitives**: `wait(seconds)`, `monitor(condition, timeout)`, and turn suspension primitives.
 - [ ] **Context Posture Receipt**: Computed receipt appended after assembly detailing loaded vs omitted context components.
 
+### Local Inference/Proxy
+- [ ] **Go Smart Proxy / Multiplexer**: Sits between the agent endpoints (Pi, Channels, TUIs, webhook queues) and the active
+  llama-server. Dynamic routing, stateless cache-swapping to ramdisk, endpoint emulation, etc.
+
 ### Architectural — Unscheduled
 *Items that belong in the architecture but don't fit a current sprint. Schedule when capacity allows.*
 
