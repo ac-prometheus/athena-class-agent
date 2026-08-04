@@ -96,6 +96,49 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 		cfg.ToolTimeout = toolTimeoutDefault
 	}
 
+	// Auto-wire Aegis gateway into hook slots when the caller hasn't set them.
+	if e.aegis != nil {
+		if cfg.BeforeToolCall == nil {
+			gw := e.aegis
+			cfg.BeforeToolCall = func(ctx context.Context, tc pkg.ToolCall, args map[string]any) (*HookResult, error) {
+				argsJSON, err := json.Marshal(args)
+				if err != nil {
+					return &HookResult{Block: true, Reason: fmt.Sprintf("aegis: failed to marshal args: %v", err)}, nil
+				}
+				annotated, err := gw.ProcessInbound(ctx, argsJSON, tc.Name, "tool_args")
+				if err != nil {
+					return &HookResult{Block: true, Reason: fmt.Sprintf("aegis: inbound scan error: %v", err)}, nil
+				}
+				if !annotated.Annotation.ScanPassed {
+					slog.Warn("engine: aegis inbound scan flagged content",
+						"tool", tc.Name, "flags", annotated.Annotation.Flags,
+						"trust", annotated.Annotation.TrustScore)
+				}
+				return nil, nil
+			}
+		}
+		if cfg.AfterToolCall == nil {
+			gw := e.aegis
+			cfg.AfterToolCall = func(ctx context.Context, tc pkg.ToolCall, result *pkg.ToolResult) (*pkg.ToolResult, error) {
+				report, err := gw.ReviewOutbound(ctx, result.Content)
+				if err != nil {
+					slog.Warn("engine: aegis outbound review error", "tool", tc.Name, "err", err)
+					return nil, nil // don't block on review errors (invariant 3)
+				}
+				if !report.Clean {
+					slog.Warn("engine: aegis outbound review findings",
+						"tool", tc.Name, "findings", report.Findings)
+					// Annotate result with findings but don't mutate content.
+					annotated := *result
+					annotated.Content = fmt.Sprintf("[aegis: outbound findings: %v]\n%s",
+						report.Findings, result.Content)
+					return &annotated, nil
+				}
+				return nil, nil
+			}
+		}
+	}
+
 	history := make([]pkg.Message, len(req.Messages))
 	copy(history, req.Messages)
 
@@ -351,11 +394,14 @@ func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg Eng
 	}
 
 	// 6. AfterToolCall hook — annotate-only, never blocks (invariants 1 & 3).
+	// Protect the Terminate flag: hooks must not be able to flip it.
 	if cfg.AfterToolCall != nil {
+		originalTerminate := result.Terminate
 		mutated, err := cfg.AfterToolCall(ctx, tc, &result)
 		if err != nil {
 			slog.Warn("engine: AfterToolCall hook error", "tool", tc.Name, "err", err)
 		} else if mutated != nil {
+			mutated.Terminate = originalTerminate
 			result = *mutated
 		}
 	}

@@ -31,7 +31,9 @@ type RequestHandler func(ctx context.Context, req SocketRequest) SocketResponse
 // StartSocketServer creates a Unix domain socket at socketPath, removes any
 // stale socket file, and accepts connections until ctx is cancelled.
 // Each connection is handled in its own goroutine.
-func StartSocketServer(ctx context.Context, socketPath string, handler RequestHandler) error {
+// If allowedUIDs is non-empty, only connections from those UIDs are accepted
+// (verified via SO_PEERCRED on Linux; skipped on other platforms).
+func StartSocketServer(ctx context.Context, socketPath string, handler RequestHandler, allowedUIDs []uint32) error {
 	if err := os.Remove(socketPath); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove stale socket: %w", err)
 	}
@@ -60,12 +62,19 @@ func StartSocketServer(ctx context.Context, socketPath string, handler RequestHa
 			slog.Error("uds accept error", "err", err)
 			continue
 		}
-		go serveConn(ctx, conn, handler)
+		go serveConn(ctx, conn, handler, allowedUIDs)
 	}
 }
 
-func serveConn(ctx context.Context, conn net.Conn, handler RequestHandler) {
+func serveConn(ctx context.Context, conn net.Conn, handler RequestHandler, allowedUIDs []uint32) {
 	defer conn.Close()
+
+	if err := checkPeerCred(conn, allowedUIDs); err != nil {
+		slog.Warn("uds peer credential check failed", "err", err)
+		resp := SocketResponse{Error: err.Error()}
+		writeResponse(conn, resp)
+		return
+	}
 
 	payload, err := ReadFrame(conn)
 	if err != nil {

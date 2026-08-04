@@ -57,7 +57,7 @@ func TestSocketServerRoundTrip(t *testing.T) {
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- StartSocketServer(ctx, sockPath, handler)
+		errCh <- StartSocketServer(ctx, sockPath, handler, nil)
 	}()
 
 	// Wait for socket to appear.

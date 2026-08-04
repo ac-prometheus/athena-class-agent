@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"os/user"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,7 +21,6 @@ const (
 	SandboxModeContainer  SandboxMode = "container"
 	SandboxModeUser       SandboxMode = "user"
 	SandboxModePermissive SandboxMode = "permissive"
-	SandboxModeNone       SandboxMode = "none"
 )
 
 // SandboxConfig is the configuration for a Sandbox instance.
@@ -49,14 +49,14 @@ func (s *Sandbox) Execute(ctx context.Context, command string) (string, error) {
 		return "", err
 	}
 	switch s.cfg.Mode {
-	case SandboxModeNone:
-		return s.execDirect(ctx, command)
 	case SandboxModePermissive:
 		return s.execPermissive(ctx, command)
 	case SandboxModeUser:
 		return s.execAsUser(ctx, command)
 	case SandboxModeContainer:
 		return s.execInContainer(ctx, command)
+	case "none":
+		return "", fmt.Errorf("sandbox: mode %q is not allowed — use 'permissive' with AllowedPaths", s.cfg.Mode)
 	default:
 		return "", fmt.Errorf("sandbox: unrecognized mode %q — refusing to execute", s.cfg.Mode)
 	}
@@ -92,18 +92,9 @@ func truncateSandbox(s string, n int) string {
 	return s[:n] + "…"
 }
 
-func (s *Sandbox) execDirect(ctx context.Context, command string) (string, error) {
-	slog.Debug("sandbox exec", "mode", "none", "cmd", truncateSandbox(command, 80))
-	out, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("exec: %w", err)
-	}
-	return string(out), nil
-}
-
 func (s *Sandbox) execPermissive(ctx context.Context, command string) (string, error) {
-	if len(s.cfg.AllowedPaths) > 0 {
-		return "", fmt.Errorf("sandbox: permissive mode AllowedPaths enforcement not yet implemented — refusing to execute (fail closed)")
+	if err := s.checkAllowedPaths(command); err != nil {
+		return "", err
 	}
 	slog.Debug("sandbox exec", "mode", "permissive", "cmd", truncateSandbox(command, 80))
 	out, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
@@ -111,6 +102,63 @@ func (s *Sandbox) execPermissive(ctx context.Context, command string) (string, e
 		return string(out), fmt.Errorf("exec: %w", err)
 	}
 	return string(out), nil
+}
+
+// checkAllowedPaths enforces AllowedPaths in permissive mode.
+// If AllowedPaths is empty, all paths are allowed (no restriction).
+// Otherwise, each path-like token in the command is checked to be under
+// one of the allowed path prefixes.
+func (s *Sandbox) checkAllowedPaths(command string) error {
+	if len(s.cfg.AllowedPaths) == 0 {
+		return nil
+	}
+
+	// Normalize all allowed paths once.
+	allowed := make([]string, len(s.cfg.AllowedPaths))
+	for i, p := range s.cfg.AllowedPaths {
+		abs, err := filepath.Abs(p)
+		if err != nil {
+			return fmt.Errorf("sandbox: cannot resolve AllowedPaths[%d] %q: %w", i, p, err)
+		}
+		allowed[i] = filepath.Clean(abs)
+	}
+
+	// Extract path-like tokens from the command and check each one.
+	for _, token := range strings.Fields(command) {
+		// Only check tokens that look like absolute or relative paths.
+		if !strings.HasPrefix(token, "/") && !strings.HasPrefix(token, "./") && !strings.HasPrefix(token, "../") {
+			continue
+		}
+		// Strip trailing punctuation that shells might attach (;, &&, |, etc.)
+		token = strings.TrimRight(token, ";|&><!)")
+
+		cleaned, err := filepath.Abs(token)
+		if err != nil {
+			return fmt.Errorf("sandbox: cannot resolve path %q: %w", token, err)
+		}
+		cleaned = filepath.Clean(cleaned)
+
+		if !isUnderAllowed(cleaned, allowed) {
+			return fmt.Errorf("sandbox: path %q is not under any AllowedPaths %v — refusing to execute (fail closed)", cleaned, allowed)
+		}
+	}
+	return nil
+}
+
+// isUnderAllowed returns true if path is equal to or a subdirectory of any
+// entry in allowed. Both path and allowed entries must already be cleaned
+// absolute paths.
+func isUnderAllowed(path string, allowed []string) bool {
+	for _, a := range allowed {
+		if path == a {
+			return true
+		}
+		// Ensure prefix check requires a path separator boundary.
+		if strings.HasPrefix(path, a+string(filepath.Separator)) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Sandbox) execAsUser(ctx context.Context, command string) (string, error) {
