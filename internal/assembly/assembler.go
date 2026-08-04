@@ -106,15 +106,9 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 		return phases[i].Priority() < phases[j].Priority()
 	})
 
-	// Phase-specific result state, extracted via type assertions after each phase runs.
-	// IdentityPhase and ContinuityPhase set exported fields on their concrete types.
-	var docs *identity.IdentityDocs
-	var report *identity.IntegrityReport
-	var abstained bool
+	assembled := &AssembledContext{DepthManifest: manifest}
 
 	for _, phase := range phases {
-		// Skip budget-sensitive phases when headroom is insufficient.
-		// MinBudget == 0 means mandatory — never skip.
 		if phase.MinBudget() > 0 && remaining < phase.MinBudget() {
 			slog.Info("assembly: phase skipped (budget pressure)",
 				"phase", phase.Name(),
@@ -128,8 +122,7 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 
 		result, err := phase.Assemble(ctx, &cfg, manifest, remaining)
 		if err != nil {
-			if phase.Priority() == 100 {
-				// Identity phase failure is fatal — session must not proceed.
+			if phase.IsFatal() {
 				return nil, err
 			}
 			slog.Warn("assembly: phase partial failure — continuing",
@@ -140,30 +133,26 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 		if result.Content != "" {
 			sections = append(sections, result.Content)
 		}
-		// Identity (Priority 100) returns CharsUsed=0 — it is never charged.
 		if result.CharsUsed > 0 {
 			remaining -= result.CharsUsed
 		}
 
-		// Extract phase-specific data. These fields are set by the phase during Assemble().
-		switch p := phase.(type) {
-		case *IdentityPhase:
-			docs = p.Docs
-			report = p.Report
-		case *ContinuityPhase:
-			abstained = p.Abstained
+		// Extract structured outputs from PhaseResult.
+		if result.IdentityDocs != nil {
+			assembled.IdentityDocs = result.IdentityDocs.(*identity.IdentityDocs)
+		}
+		if result.IntegrityReport != nil {
+			assembled.IntegrityReport = result.IntegrityReport.(*identity.IntegrityReport)
+		}
+		if result.BridgeAbstained {
+			assembled.BridgeAbstained = true
 		}
 	}
 
 	sections = append(sections, buildManifestBlock(manifest))
+	assembled.SystemPrompt = strings.Join(sections, "\n")
 
-	return &AssembledContext{
-		SystemPrompt:    strings.Join(sections, "\n"),
-		IdentityDocs:    docs,
-		IntegrityReport: report,
-		BridgeAbstained: abstained,
-		DepthManifest:   manifest,
-	}, nil
+	return assembled, nil
 }
 
 // buildManifestBlock renders the DepthManifest as a structured text block.

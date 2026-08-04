@@ -11,9 +11,7 @@ import (
 
 // ContinuityPhase implements Phase for Phase 2 — bridge synthesis + recent T3 + active T4 threads.
 // This phase is always attempted; errors are non-fatal (assembler logs and continues).
-type ContinuityPhase struct {
-	Abstained bool // populated after Assemble — whether the orientation bridge abstained
-}
+type ContinuityPhase struct{}
 
 // NewContinuityPhase creates a ContinuityPhase.
 func NewContinuityPhase() *ContinuityPhase {
@@ -22,18 +20,21 @@ func NewContinuityPhase() *ContinuityPhase {
 
 func (p *ContinuityPhase) Name() string   { return "continuity" }
 func (p *ContinuityPhase) Priority() int  { return 200 }
-func (p *ContinuityPhase) MinBudget() int { return 0 } // always attempted; partial output is fine
+func (p *ContinuityPhase) MinBudget() int { return 0 }     // always attempted
+func (p *ContinuityPhase) IsFatal() bool  { return false }
 
 // Assemble builds the Phase 2 continuity block: orientation bridge synthesis, the two most
 // recent T3 narrative summaries, and active T4 reflection threads. CharsUsed is charged against
 // the dynamic budget. Errors are non-fatal — the assembler will log-and-continue.
 func (p *ContinuityPhase) Assemble(ctx context.Context, cfg *AssembleConfig, manifest *DepthManifest, remaining int) (PhaseResult, error) {
+	if cfg.store == nil {
+		return PhaseResult{}, nil
+	}
 	result, abstained, err := p.assembleContinuity(ctx, cfg, manifest)
-	p.Abstained = abstained
 	if err != nil {
 		return PhaseResult{}, err
 	}
-	return PhaseResult{Content: result, CharsUsed: len(result)}, nil
+	return PhaseResult{Content: result, CharsUsed: len(result), BridgeAbstained: abstained}, nil
 }
 
 // assembleContinuity builds Phase 2 — bridge synthesis + most recent T3 + active T4 threads.

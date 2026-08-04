@@ -17,7 +17,8 @@ func NewIncomingPhase() *IncomingPhase { return &IncomingPhase{} }
 
 func (p *IncomingPhase) Name() string     { return "incoming" }
 func (p *IncomingPhase) Priority() int    { return 500 }
-func (p *IncomingPhase) MinBudget() int   { return 0 } // mandatory — never skip
+func (p *IncomingPhase) MinBudget() int   { return 0 }     // mandatory — never skip
+func (p *IncomingPhase) IsFatal() bool    { return false }
 
 // Assemble builds the Phase 5 incoming block: unread message count and any inband notes
 // (e.g. interrupt notices from CheckpointScan). CharsUsed is always 0 — incoming is

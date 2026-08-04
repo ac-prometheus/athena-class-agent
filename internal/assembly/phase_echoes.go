@@ -21,6 +21,7 @@ func NewEchoPoolPhase() *EchoPoolPhase { return &EchoPoolPhase{} }
 func (p *EchoPoolPhase) Name() string     { return "echo-pool" }
 func (p *EchoPoolPhase) Priority() int    { return 400 }
 func (p *EchoPoolPhase) MinBudget() int   { return 8000 }
+func (p *EchoPoolPhase) IsFatal() bool    { return false }
 
 // Assemble builds the Phase 4 echo pool block. Requires an embedding provider;
 // returns an empty result (not an error) when the provider is nil.

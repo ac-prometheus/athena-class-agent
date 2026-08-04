@@ -17,9 +17,10 @@ func NewGroundingPhase() *GroundingPhase { return &GroundingPhase{} }
 func (p *GroundingPhase) Name() string     { return "grounding" }
 func (p *GroundingPhase) Priority() int    { return 600 }
 func (p *GroundingPhase) MinBudget() int   { return 1 }
+func (p *GroundingPhase) IsFatal() bool    { return false }
 
 // Assemble builds the Phase 6 grounding block from the operator-configured environment.
-// CharsUsed is always 0 — grounding is appended unconditionally and never charged.
+// Skippable under budget pressure (MinBudget=1). CharsUsed is 0 — not charged.
 func (p *GroundingPhase) Assemble(_ context.Context, cfg *AssembleConfig, _ *DepthManifest, _ int) (PhaseResult, error) {
 	gd := awareness.Gather(cfg.grounding)
 	content := "=== GROUNDING ===\n" + gd.Format() + "\n"

@@ -17,10 +17,15 @@ func NewWorldModelPhase() *WorldModelPhase { return &WorldModelPhase{} }
 func (p *WorldModelPhase) Name() string     { return "world-model" }
 func (p *WorldModelPhase) Priority() int    { return 300 }
 func (p *WorldModelPhase) MinBudget() int   { return 1 }
+func (p *WorldModelPhase) IsFatal() bool    { return false }
 
 // Assemble builds the world model block from entities and relational profiles in the memory store.
 // Returns an empty result (not an error) when the store has no data to surface.
 func (p *WorldModelPhase) Assemble(ctx context.Context, cfg *AssembleConfig, manifest *DepthManifest, remaining int) (PhaseResult, error) {
+	if cfg.store == nil {
+		return PhaseResult{}, nil
+	}
+
 	var parts []string
 
 	entities, err := cfg.store.SearchEntities(ctx, "", 10)

@@ -15,8 +15,6 @@ import (
 // Identity is never cut; CharsUsed is always 0.
 type IdentityPhase struct {
 	identityDir string
-	Docs        *identity.IdentityDocs    // populated after Assemble
-	Report      *identity.IntegrityReport // populated after Assemble
 }
 
 // NewIdentityPhase creates an IdentityPhase rooted at identityDir.
@@ -26,7 +24,8 @@ func NewIdentityPhase(identityDir string) *IdentityPhase {
 
 func (p *IdentityPhase) Name() string     { return "identity" }
 func (p *IdentityPhase) Priority() int    { return 100 }
-func (p *IdentityPhase) MinBudget() int   { return 0 } // mandatory — never skip
+func (p *IdentityPhase) MinBudget() int   { return 0 }    // mandatory — never skip
+func (p *IdentityPhase) IsFatal() bool    { return true }  // session aborts on identity failure
 
 // Assemble loads identity documents, verifies anchors, enforces the witness check on first boot,
 // and builds the Phase 1 block. Errors are fatal — the assembler must not start the session.
@@ -70,14 +69,15 @@ func (p *IdentityPhase) Assemble(ctx context.Context, cfg *AssembleConfig, manif
 		slog.Warn("assembly: no anchor store — skipping identity integrity check")
 	}
 
-	p.Docs = docs
-	p.Report = report
-
 	content := buildIdentityBlock(docs)
 	slog.Info("assembly: phase 1 identity assembled", "docs", len(docs.Docs))
 
-	// Identity is not charged against remaining — it is never cut.
-	return PhaseResult{Content: content, CharsUsed: 0}, nil
+	return PhaseResult{
+		Content:         content,
+		CharsUsed:       0,
+		IdentityDocs:    docs,
+		IntegrityReport: report,
+	}, nil
 }
 
 // buildIdentityBlock formats identity documents into the Phase 1 block.
