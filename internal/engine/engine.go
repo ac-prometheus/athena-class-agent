@@ -115,9 +115,11 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 					return &HookResult{Block: true, Reason: fmt.Sprintf("aegis: inbound scan error: %v", err)}, nil
 				}
 				if !annotated.Annotation.ScanPassed {
-					slog.Warn("engine: aegis inbound scan flagged content",
-						"tool", tc.Name, "flags", annotated.Annotation.Flags,
-						"trust", annotated.Annotation.TrustScore)
+					// Inbound screening blocks (Invariant 4). Outbound annotation does not (Invariant 3).
+					return &HookResult{
+						Block:  true,
+						Reason: fmt.Sprintf("aegis: inbound scan failed — flags: %v, trust: %.2f", annotated.Annotation.Flags, annotated.Annotation.TrustScore),
+					}, nil
 				}
 				return nil, nil
 			}
