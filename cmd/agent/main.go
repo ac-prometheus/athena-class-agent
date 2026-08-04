@@ -9,7 +9,7 @@ import (
 
 	"github.com/ac-prometheus/athena-class-agent/internal/daemon"
 	"github.com/ac-prometheus/athena-class-agent/internal/engine"
-	"github.com/ac-prometheus/athena-class-agent/internal/harness"
+	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
@@ -54,7 +54,7 @@ func run() error {
 		RequestTimeout:     cfg.LLMRequestTimeout,
 	})
 
-	assembler := harness.NewContextAssembler(cfg.IdentityDir, cfg.TokenBudget)
+	assembler := assembly.NewContextAssembler(cfg.IdentityDir, cfg.TokenBudget)
 
 	runner := &phase1Runner{
 		cfg:       cfg,
@@ -74,11 +74,11 @@ func run() error {
 type phase1Runner struct {
 	cfg       *platform.Config
 	client    pkg.LLMClient
-	assembler *harness.ContextAssembler
+	assembler *assembly.ContextAssembler
 }
 
 func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error {
-	cfg := harness.MinimalAssembleConfig()
+	cfg := assembly.MinimalAssembleConfig()
 	cfg.InbandNotes = inbandNotes
 	assembled, err := r.assembler.Assemble(context.Background(), cfg)
 	if err != nil {
@@ -86,8 +86,8 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 	}
 	systemPrompt := assembled.SystemPrompt
 
-	session := harness.NewSession(r.cfg.AgentName, wakeReason, nil)
-	budget := harness.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)
+	session := assembly.NewSession(r.cfg.AgentName, wakeReason, nil)
+	budget := assembly.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)
 	hooks := engine.NewHookPipeline()
 
 	loop := engine.NewLoop(r.client, nil, hooks, engine.LoopConfig{

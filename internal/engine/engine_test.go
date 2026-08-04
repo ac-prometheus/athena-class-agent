@@ -96,7 +96,7 @@ func textResp(text string) *pkg.CompletionResponse {
 }
 
 func newEngine(client pkg.LLMClient, reg pkg.ToolRegistry) *Engine {
-	return NewEngine(client, reg, nil, nil)
+	return NewEngine(client, reg, nil)
 }
 
 // --- Tests ---

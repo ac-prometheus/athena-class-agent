@@ -1,6 +1,7 @@
 package aegis
 
 import (
+	"bytes"
 	"context"
 	"log/slog"
 	"time"
@@ -54,7 +55,7 @@ func (g *Gateway) ProcessInbound(ctx context.Context, raw []byte, source, conten
 	)
 
 	return &pkg.AnnotatedContent{
-		Original:   raw,
+		Original:   bytes.Clone(raw),
 		Normalized: normalized,
 		Annotation: annotation,
 	}, nil

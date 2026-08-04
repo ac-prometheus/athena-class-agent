@@ -49,7 +49,7 @@ type ExperientialLog struct {
 	SessionID     string
 	Content       string
 	ContentSource string // "self", "operator", "tool-result", "browser-content", "search-result", "forum-content"
-	CreatedAt     interface{} // time.Time — interface avoids import cycle with time in pkg
+	CreatedAt     time.Time
 }
 
 // NarrativeSummary is a T3 compressed summary of experiential logs.

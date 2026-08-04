@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/awareness"
-	"github.com/ac-prometheus/athena-class-agent/internal/harness"
+	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -42,11 +42,11 @@ func (h *T2LoggerHook) Run(ctx context.Context, turn TurnResult) error {
 // warnings at soft and hard thresholds. Hard budget is a signal to the loop
 // to begin wrapping up — the hook itself does not halt the session.
 type BudgetMonitorHook struct {
-	budget *harness.TokenBudget
+	budget *assembly.TokenBudget
 }
 
 // NewBudgetMonitorHook creates a BudgetMonitorHook tracking the given budget.
-func NewBudgetMonitorHook(budget *harness.TokenBudget) *BudgetMonitorHook {
+func NewBudgetMonitorHook(budget *assembly.TokenBudget) *BudgetMonitorHook {
 	return &BudgetMonitorHook{budget: budget}
 }
 
@@ -55,13 +55,13 @@ func (h *BudgetMonitorHook) Name() string { return "budget-monitor" }
 func (h *BudgetMonitorHook) Run(ctx context.Context, turn TurnResult) error {
 	level := h.budget.Add(turn.PromptTokens, turn.CompletionTokens)
 	switch level {
-	case harness.BudgetSoft:
+	case assembly.BudgetSoft:
 		slog.Warn("budget-monitor: soft threshold reached — agent should begin wrapping up",
 			"session", turn.SessionID,
 			"turn", turn.TurnNumber,
 			"remaining", h.budget.Remaining(),
 		)
-	case harness.BudgetHard:
+	case assembly.BudgetHard:
 		slog.Warn("budget-monitor: hard threshold reached — session should end",
 			"session", turn.SessionID,
 			"turn", turn.TurnNumber,

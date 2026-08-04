@@ -1,8 +1,7 @@
 package engine
 
-// Engine is the MOP Phase 3 agentic loop. It replaces Loop.Run() with a proper
-// tool execution pipeline: parallel tool dispatch, Aegis hook integration,
-// FinishReason handling, and role:"tool" message threading.
+// Engine is the MOP Phase 3 agentic loop. Parallel tool dispatch, Aegis hook
+// integration, FinishReason handling, and role:"tool" message threading.
 //
 // Five autonomy invariants (never relax these):
 //  1. Never block on annotation alone — AfterToolCall is annotate-only.
@@ -67,16 +66,15 @@ type LoopResult struct {
 type Engine struct {
 	client   pkg.LLMClient
 	registry pkg.ToolRegistry
-	aegis    pkg.ContentGateway // nil = no Aegis screening
 	hooks    *HookPipeline
 }
 
-// NewEngine creates an Engine. aegis may be nil to disable content screening.
-func NewEngine(client pkg.LLMClient, registry pkg.ToolRegistry, aegis pkg.ContentGateway, hooks *HookPipeline) *Engine {
+// NewEngine creates an Engine. Aegis screening is wired through EngineConfig hooks
+// (BeforeToolCall/AfterToolCall), not stored on the Engine struct.
+func NewEngine(client pkg.LLMClient, registry pkg.ToolRegistry, hooks *HookPipeline) *Engine {
 	return &Engine{
 		client:   client,
 		registry: registry,
-		aegis:    aegis,
 		hooks:    hooks,
 	}
 }

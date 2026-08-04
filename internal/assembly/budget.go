@@ -1,4 +1,4 @@
-package harness
+package assembly
 
 import "log/slog"
 

@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
-	"github.com/ac-prometheus/athena-class-agent/internal/harness"
+	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
@@ -14,15 +14,15 @@ import (
 // conditions and starts sessions. In external mode, it waits for triggers.
 type Daemon struct {
 	cfg      Config
-	harness  sessionRunner
+	assembly sessionRunner
 	registry *channels.ChannelRegistry
 	gateway  pkg.ContentGateway
 	waker    *WakeScheduler
 	db       platform.DB // optional; enables checkpoint scan on startup
 }
 
-// sessionRunner is the minimal interface the daemon needs from harness.
-// Keeps daemon from importing harness directly in Phase 1.
+// sessionRunner is the minimal interface the daemon needs from assembly.
+// Keeps daemon from importing assembly directly in Phase 1.
 type sessionRunner interface {
 	RunSession(wakeReason string, inbandNotes []string) error
 }
@@ -37,7 +37,7 @@ type Config struct {
 // New creates a Daemon wired to the given session runner.
 // Pass nil registry/gateway to use the Phase 1 one-shot fallback.
 func New(cfg Config, runner sessionRunner) *Daemon {
-	return &Daemon{cfg: cfg, harness: runner}
+	return &Daemon{cfg: cfg, assembly: runner}
 }
 
 // WithDB attaches a database handle so the daemon can run CheckpointScan at startup.
@@ -58,7 +58,7 @@ func (d *Daemon) WithChannels(
 }
 
 // Run blocks, selecting on channel events, scheduled wakes, and OS signals.
-// When a wake condition fires, it starts a full session via the harness.
+// When a wake condition fires, it starts a full session via the assembly.
 //
 // Falls back to a single one-shot session when no channels are registered.
 func (d *Daemon) Run(ctx context.Context) error {
@@ -67,13 +67,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	if d.registry == nil || len(d.registry.List()) == 0 {
 		slog.Info("daemon: no channels configured — running one-shot session")
-		return d.harness.RunSession("daemon-startup", startupNotes)
+		return d.assembly.RunSession("daemon-startup", startupNotes)
 	}
 
 	events, err := d.registry.StartAll(ctx)
 	if err != nil {
 		slog.Warn("daemon: channel startup error, falling back to one-shot", "err", err)
-		return d.harness.RunSession("daemon-startup", startupNotes)
+		return d.assembly.RunSession("daemon-startup", startupNotes)
 	}
 
 	slog.Info("daemon: event loop started", "channels", len(d.registry.List()))
@@ -106,7 +106,7 @@ func (d *Daemon) scanInterruptedSessions(ctx context.Context) []string {
 	if d.db == nil {
 		return nil
 	}
-	interrupted, err := harness.CheckpointScan(ctx, d.db)
+	interrupted, err := assembly.CheckpointScan(ctx, d.db)
 	if err != nil {
 		slog.Warn("daemon: checkpoint scan failed", "err", err)
 		return nil
@@ -145,7 +145,7 @@ func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent, inba
 	wakeReason := "channel:" + ev.Channel
 	slog.Info("daemon: wake condition met", "reason", wakeReason, "sender", ev.SenderName)
 
-	if err := d.harness.RunSession(wakeReason, inbandNotes); err != nil {
+	if err := d.assembly.RunSession(wakeReason, inbandNotes); err != nil {
 		slog.Error("daemon: session error", "err", err)
 	}
 }
