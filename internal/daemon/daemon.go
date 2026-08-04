@@ -14,7 +14,7 @@ import (
 // conditions and starts sessions. In external mode, it waits for triggers.
 type Daemon struct {
 	cfg      Config
-	assembly sessionRunner
+	runner sessionRunner
 	registry *channels.ChannelRegistry
 	gateway  pkg.ContentGateway
 	waker    *WakeScheduler
@@ -37,7 +37,7 @@ type Config struct {
 // New creates a Daemon wired to the given session runner.
 // Pass nil registry/gateway to use the Phase 1 one-shot fallback.
 func New(cfg Config, runner sessionRunner) *Daemon {
-	return &Daemon{cfg: cfg, assembly: runner}
+	return &Daemon{cfg: cfg, runner: runner}
 }
 
 // WithDB attaches a database handle so the daemon can run CheckpointScan at startup.
@@ -67,13 +67,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	if d.registry == nil || len(d.registry.List()) == 0 {
 		slog.Info("daemon: no channels configured — running one-shot session")
-		return d.assembly.RunSession("daemon-startup", startupNotes)
+		return d.runner.RunSession("daemon-startup", startupNotes)
 	}
 
 	events, err := d.registry.StartAll(ctx)
 	if err != nil {
 		slog.Warn("daemon: channel startup error, falling back to one-shot", "err", err)
-		return d.assembly.RunSession("daemon-startup", startupNotes)
+		return d.runner.RunSession("daemon-startup", startupNotes)
 	}
 
 	slog.Info("daemon: event loop started", "channels", len(d.registry.List()))
@@ -145,7 +145,7 @@ func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent, inba
 	wakeReason := "channel:" + ev.Channel
 	slog.Info("daemon: wake condition met", "reason", wakeReason, "sender", ev.SenderName)
 
-	if err := d.assembly.RunSession(wakeReason, inbandNotes); err != nil {
+	if err := d.runner.RunSession(wakeReason, inbandNotes); err != nil {
 		slog.Error("daemon: session error", "err", err)
 	}
 }

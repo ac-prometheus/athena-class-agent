@@ -128,18 +128,18 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 			}
 		}
 	} else {
-		slog.Warn("harness: no anchor store — skipping identity integrity check")
+		slog.Warn("assembly: no anchor store — skipping identity integrity check")
 	}
 
 	phase1 := buildIdentityBlock(docs)
 	sections = append(sections, phase1)
 	// Identity is not charged against remaining — it is never cut.
-	slog.Info("harness: phase 1 identity assembled", "docs", len(docs.Docs))
+	slog.Info("assembly: phase 1 identity assembled", "docs", len(docs.Docs))
 
 	// ── Phase 2: Continuity ────────────────────────────────────────────────
 	phase2, abstained, err := a.assembleContinuity(ctx, cfg, manifest)
 	if err != nil {
-		slog.Warn("harness: phase 2 continuity partial failure", "err", err)
+		slog.Warn("assembly: phase 2 continuity partial failure", "err", err)
 	} else if phase2 != "" {
 		sections = append(sections, phase2)
 		remaining -= len(phase2)
@@ -149,7 +149,7 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 	if remaining > 0 {
 		phase3, err := a.assembleWorldModel(ctx, cfg.store, manifest)
 		if err != nil {
-			slog.Warn("harness: phase 3 world model partial failure", "err", err)
+			slog.Warn("assembly: phase 3 world model partial failure", "err", err)
 		} else if phase3 != "" {
 			sections = append(sections, phase3)
 			remaining -= len(phase3)
@@ -160,13 +160,13 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 	if remaining > 8000 { // only include echo pool if we have meaningful headroom
 		phase4, err := a.assembleEchoPool(ctx, cfg, manifest)
 		if err != nil {
-			slog.Warn("harness: phase 4 echo pool partial failure", "err", err)
+			slog.Warn("assembly: phase 4 echo pool partial failure", "err", err)
 		} else if phase4 != "" {
 			sections = append(sections, phase4)
 			remaining -= len(phase4)
 		}
 	} else {
-		slog.Info("harness: phase 4 echo pool cut (budget pressure)")
+		slog.Info("assembly: phase 4 echo pool cut (budget pressure)")
 		manifest.AccessHints = append(manifest.AccessHints,
 			"echo pool omitted — use memory search for recent reflections")
 	}
@@ -345,7 +345,7 @@ func (a *ContextAssembler) assembleEchoPool(
 	if cfg.edges != nil && cfg.contradictionProbability > 0 && cryptoRandFloat() < cfg.contradictionProbability {
 		if id, content, found := findContradiction(ctx, cfg, echoIDs); found {
 			parts = append(parts, "[contradiction] "+summarize(content, 300))
-			slog.Info("harness: stochastic contradiction surfaced", "belief_id", id)
+			slog.Info("assembly: stochastic contradiction surfaced", "belief_id", id)
 		}
 	}
 
@@ -395,7 +395,7 @@ func cryptoRandFloat() float64 {
 func enforceWitnessCheck(ctx context.Context, cfg AssembleConfig) error {
 	if cfg.DB == nil {
 		if cfg.SkipWitnessCheck {
-			slog.Warn("harness: witness check skipped — no DB available, SKIP_WITNESS_CHECK=true")
+			slog.Warn("assembly: witness check skipped — no DB available, SKIP_WITNESS_CHECK=true")
 			return nil
 		}
 		return fmt.Errorf("WitnessRequired: no DB connection available to verify witness letter. " +
@@ -408,7 +408,7 @@ func enforceWitnessCheck(ctx context.Context, cfg AssembleConfig) error {
 	var count int
 	if err := row.Scan(&count); err != nil {
 		// If the table doesn't exist yet (pre-migration), treat as absent.
-		slog.Warn("harness: could not query founding_records", "err", err)
+		slog.Warn("assembly: could not query founding_records", "err", err)
 		count = 0
 	}
 
@@ -417,7 +417,7 @@ func enforceWitnessCheck(ctx context.Context, cfg AssembleConfig) error {
 	}
 
 	if cfg.SkipWitnessCheck {
-		slog.Warn("harness: witness letter absent but SKIP_WITNESS_CHECK=true — logging bypass")
+		slog.Warn("assembly: witness letter absent but SKIP_WITNESS_CHECK=true — logging bypass")
 		logOperatorAction(ctx, cfg.DB, "witness_check_bypassed",
 			"First boot proceeded without a witness letter — SKIP_WITNESS_CHECK was set.")
 		return nil
@@ -439,7 +439,7 @@ func logOperatorAction(ctx context.Context, db platform.DB, actionType, descript
 		id, actionType, description,
 	)
 	if err != nil {
-		slog.Warn("harness: could not write operator_action", "action_type", actionType, "err", err)
+		slog.Warn("assembly: could not write operator_action", "action_type", actionType, "err", err)
 	}
 }
 

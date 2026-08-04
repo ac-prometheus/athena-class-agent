@@ -34,10 +34,10 @@ type Session struct {
 func NewSession(agentName, wakeReason string, db platform.DB) *Session {
 	var buf [16]byte
 	if _, err := rand.Read(buf[:]); err != nil {
-		panic("harness: crypto/rand unavailable: " + err.Error())
+		panic("assembly: crypto/rand unavailable: " + err.Error())
 	}
 	id := agentName + "-" + hex.EncodeToString(buf[:])
-	slog.Info("harness: new session", "session_id", id, "agent", agentName, "wake_reason", wakeReason)
+	slog.Info("assembly: new session", "session_id", id, "agent", agentName, "wake_reason", wakeReason)
 
 	return &Session{
 		Session: pkg.Session{
@@ -59,7 +59,7 @@ func (s *Session) End() {
 	s.State = pkg.SessionStateCompleted
 
 	duration := now.Sub(s.StartedAt)
-	slog.Info("harness: session ended",
+	slog.Info("assembly: session ended",
 		"session_id", s.ID,
 		"turns", s.TurnCount,
 		"tokens_used", s.TokensUsed,
@@ -95,9 +95,9 @@ ON CONFLICT (id) DO UPDATE
 		s.ID, s.ID, s.TurnCount, "", s.TokensUsed,
 	)
 	if err != nil {
-		return fmt.Errorf("harness: write checkpoint: %w", err)
+		return fmt.Errorf("assembly: write checkpoint: %w", err)
 	}
-	slog.Debug("harness: checkpoint written", "session_id", s.ID, "turn", s.TurnCount)
+	slog.Debug("assembly: checkpoint written", "session_id", s.ID, "turn", s.TurnCount)
 	return nil
 }
 
@@ -137,7 +137,7 @@ func CheckpointScan(ctx context.Context, db platform.DB) ([]*InterruptedSession,
 		cutoff,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("harness: checkpoint scan query: %w", err)
+		return nil, fmt.Errorf("assembly: checkpoint scan query: %w", err)
 	}
 	defer rows.Close()
 
@@ -147,7 +147,7 @@ func CheckpointScan(ctx context.Context, db platform.DB) ([]*InterruptedSession,
 		var turnNumber int
 		var createdAt time.Time
 		if err := rows.Scan(&sessionID, &turnNumber, &createdAt); err != nil {
-			return nil, fmt.Errorf("harness: checkpoint scan scan: %w", err)
+			return nil, fmt.Errorf("assembly: checkpoint scan scan: %w", err)
 		}
 		interrupted = append(interrupted, &InterruptedSession{
 			SessionID:  sessionID,
@@ -156,7 +156,7 @@ func CheckpointScan(ctx context.Context, db platform.DB) ([]*InterruptedSession,
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("harness: checkpoint scan rows: %w", err)
+		return nil, fmt.Errorf("assembly: checkpoint scan rows: %w", err)
 	}
 
 	if len(interrupted) == 0 {
@@ -172,11 +172,11 @@ func CheckpointScan(ctx context.Context, db platform.DB) ([]*InterruptedSession,
 	)
 	if err != nil {
 		// Log but don't fail — the session notes were already collected.
-		slog.Warn("harness: could not mark checkpoints interrupted", "err", err)
+		slog.Warn("assembly: could not mark checkpoints interrupted", "err", err)
 	}
 
 	for _, is := range interrupted {
-		slog.Warn("harness: interrupted session found",
+		slog.Warn("assembly: interrupted session found",
 			"session_id", is.SessionID,
 			"turn", is.TurnNumber,
 			"date", is.Date.Format(time.RFC3339),
