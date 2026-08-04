@@ -17,7 +17,7 @@ func (n *NoOpGateway) ProcessInbound(_ context.Context, raw []byte, source, cont
 		Original:   raw,
 		Normalized: string(raw),
 		Annotation: pkg.AegisAnnotation{
-			TrustScore:    1.0,
+			TrustScore:    0.40,
 			Source:        source,
 			ContentSource: contentSource,
 			ScanPassed:    true,

@@ -67,16 +67,21 @@ type Engine struct {
 	client   pkg.LLMClient
 	registry pkg.ToolRegistry
 	hooks    *HookPipeline
+	aegis    pkg.ContentGateway
 }
 
-// NewEngine creates an Engine. Aegis screening is wired through EngineConfig hooks
-// (BeforeToolCall/AfterToolCall), not stored on the Engine struct.
+// NewEngine creates an Engine.
 func NewEngine(client pkg.LLMClient, registry pkg.ToolRegistry, hooks *HookPipeline) *Engine {
 	return &Engine{
 		client:   client,
 		registry: registry,
 		hooks:    hooks,
 	}
+}
+
+// WithAegis sets the Aegis content gateway for inbound/outbound screening.
+func (e *Engine) WithAegis(gw pkg.ContentGateway) {
+	e.aegis = gw
 }
 
 // RunLoop executes the multi-turn agentic loop over req.
