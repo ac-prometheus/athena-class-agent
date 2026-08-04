@@ -20,21 +20,28 @@ Integrated and synthesized from:
 ### Sprint 1: Context Assembly Promotion, Seam Security & Immediate Fixes
 *Focus: Structural promotion of assembly package, fixing fail-open security boundaries, slice immutability, and database dialect crashes.*
 
-- [ ] **Promote Context Assembly to `internal/assembly/`**: Move `context.go`, `budget.go`, `session.go` assembly concerns out of `internal/harness/` into `internal/assembly/` as a top-level domain alongside `engine/`. Establish clean uni-directional dependency DAG (`assembly` → `memory`/`identity`/`awareness`/`pkg`). *(Sources: Vesper Brief, Gemini Review)*
-- [ ] **Fix Aegis `AnnotatedContent.Original` Slice Mutation**: In `internal/aegis/gateway.go`, return `bytes.Clone(raw)` to enforce the 2nd Autonomy Invariant (*raw experiential archive is inviolable*). *(Sources: Circe Phase 4 C6, Gemini Review)*
-- [ ] **Fix SQLite Dialect Incompatibility & Abstract Checkpoints**: Remove Postgres-specific SQL (`$1` placeholders, `NOW()`) from `session.go` and `context.go`. Abstract checkpoint upserts and queries into store layer / `time.Now().UTC()`. *(Sources: External Code Audit #1, Gemini Review)*
-- [ ] **Eliminate Service API Bypass in `DispatchToolCall`**: Refactor `internal/engine/dispatch.go` to enforce `BeforeToolCall` / `AfterToolCall` Aegis hooks for all tool execution paths, resolving fail-open risk. *(Sources: Red Security Review HIGH, Gemini Review)*
-- [ ] **Clean Up `Engine` Struct & Type Erasure**: Remove dead `aegis pkg.ContentGateway` field on `Engine` struct (`internal/engine/engine.go`). Fix `ExperientialLog.CreatedAt` type in `pkg/interfaces.go` from `interface{}` to `time.Time`. *(Sources: Circe MOP C4, Gemini Review)*
+- [x] **Promote Context Assembly to `internal/assembly/`**: Move `context.go`, `budget.go`, `session.go` assembly concerns out of `internal/harness/` into `internal/assembly/` as a top-level domain alongside `engine/`. Establish clean uni-directional dependency DAG (`assembly` → `memory`/`identity`/`awareness`/`pkg`). *(Sources: Vesper Brief, Gemini Review)* — shipped `aae80a0`
+- [x] **Fix Aegis `AnnotatedContent.Original` Slice Mutation**: In `internal/aegis/gateway.go`, return `bytes.Clone(raw)` to enforce the 2nd Autonomy Invariant (*raw experiential archive is inviolable*). *(Sources: Circe Phase 4 C6, Gemini Review)* — shipped `50e6760`
+- [ ] **Fix SQLite Dialect Incompatibility & Abstract Checkpoints**: Remove Postgres-specific SQL (`$1` placeholders, `NOW()`) from `session.go` and `context.go`. Abstract checkpoint upserts and queries into store layer / `time.Now().UTC()`. *(Sources: External Code Audit #1, Gemini Review)* — **HELD: reserved for Aurora's first coding task**
+- [x] **Eliminate Service API Bypass in `DispatchToolCall`**: Removed legacy `DispatchToolCall` and `Loop.Run()` entirely. `Engine.executeSingleTool` is the only dispatch path. `BeforeToolCall`/`AfterToolCall` hooks fire unconditionally. *(Sources: Red Security Review HIGH, Gemini Review)* — shipped `aae80a0`
+- [x] **Clean Up `Engine` Struct & Type Erasure**: Remove dead `aegis pkg.ContentGateway` field on `Engine` struct (`internal/engine/engine.go`). Fix `ExperientialLog.CreatedAt` type in `pkg/interfaces.go` from `interface{}` to `time.Time`. Dead field subsequently re-added with `WithAegis` setter. *(Sources: Circe MOP C4, Gemini Review)* — shipped `aae80a0`
 
 ### Sprint 2: Phase Registry, Aegis Extraction & Engine Hook Consolidation
 *Focus: Implement extensible context assembly phase registry, extract Aegis public seam, wire live engine hooks.*
 
-- [ ] **Context Assembly Phase Registry**: Replace hardcoded `Assemble()` sequence in `internal/assembly/` with a `Phase` interface (`Name()`, `Priority()`, `MinBudgetTokens()`, `Assemble()`) returning structured `PhaseContribution`. Phases register in an ordered slice, enabling per-mode context generation. *(Sources: Vesper Brief, Gemini Review)*
-- [ ] **Strongly-Typed Token Budgeting**: Encapsulate character-to-token math into `TokenBudget` struct; remove raw `remaining > 8000` magic char guards. *(Sources: Gemini Review)*
-- [ ] **Aegis Extraction (Public Seam vs Private Implementation)**: Keep `pkg.ContentGateway` public. Extract implementation to private repo; ship harness with default `NoOpGateway` and `BasicGateway`. *(Sources: Vesper Brief, Red Security Review, Gemini Review)*
-- [ ] **Wire Aegis Gateway to Engine Hooks**: Connect `gateway.ProcessInbound` / `ReviewOutbound` to `BeforeToolCall` / `AfterToolCall` in `cmd/agent` and engine loop. *(Sources: Harness map, MOP Phase 4)*
-- [ ] **AfterToolCall Terminate Protection**: Ensure `AfterToolCall` hook cannot mutate `ToolResult.Terminate` flag. *(Sources: Red Security Review MEDIUM)*
-- [ ] **UDS & Sandbox Egress Hardening**: Add `SO_PEERCRED` auth to UDS socket (`internal/tools/uds.go`); enforce `AllowedPaths` in permissive sandbox mode; remove `SandboxModeNone`. *(Sources: Red Security Review HIGH)*
+- [x] **Context Assembly Phase Registry**: Replaced monolithic `context.go` with `Phase` interface + six implementations (`identity`, `continuity`, `worldmodel`, `echoes`, `incoming`, `grounding`). `IsFatal()` on interface. Structured `PhaseResult`. Stateless phases. Priority gaps (100s) leave room for future phases. *(Sources: Vesper Brief, Gemini Review)* — shipped `60fc1ff`, ghost fixes `871e8ec`
+- [ ] **Strongly-Typed Token Budgeting**: Encapsulate character-to-token math into `TokenBudget` struct; remove raw `remaining > 8000` magic char guards. *(Sources: Gemini Review)* — **not confirmed in Sprint 2 commits; carry to Sprint 3**
+- [ ] **Aegis Extraction (Public Seam vs Private Implementation)**: Keep `pkg.ContentGateway` public. Extract implementation to private repo; ship harness with default `NoOpGateway` and `BasicGateway`. *(Sources: Vesper Brief, Red Security Review, Gemini Review)* — **DEFERRED to Sprint 3**
+- [x] **Wire Aegis Gateway to Engine Hooks**: `ProcessInbound`/`ReviewOutbound` wired to `BeforeToolCall`/`AfterToolCall`. `NoOpGateway` as default. `BeforeToolCall` blocks on `ScanPassed=false` (Invariant 4). `AfterToolCall` annotates only (Invariant 3). *(Sources: Harness map, MOP Phase 4)* — shipped `3006917`, `77f01e6`, `4184d13`
+- [x] **AfterToolCall Terminate Protection**: Original `Terminate` value saved and restored after hook runs. *(Sources: Red Security Review MEDIUM)* — shipped `3006917`
+- [x] **UDS & Sandbox Egress Hardening**: `SO_PEERCRED` auth on UDS socket (Linux + stub on others). `AllowedPaths` enforcement in permissive mode. `SandboxModeNone` removed — fail closed with clear error. *(Sources: Red Security Review HIGH)* — shipped `3006917`
+
+### Ghost Review Findings — Tracked for Follow-Up
+*Items surfaced during Sprint 1/2 ghost reviews, not yet resolved. Address opportunistically or in Sprint 3.*
+
+- [ ] **C1 — Hook Concurrency (mutex before Phase 3)**: `BeforeToolCall`/`AfterToolCall` hooks may race under parallel tool execution; a mutex is needed before Phase 3 parallel dispatch lands. *(Ghost review C1)*
+- [ ] **N1 — Assembly Test Coverage**: Phase registry and assembler lack unit tests covering phase skipping, fatal-phase error propagation, and budget exhaustion. *(Ghost review N1)*
+- [ ] **C1/C2 — Sandbox Shell Expansion & Symlink Limitations**: Permissive sandbox `AllowedPaths` enforcement does not account for shell expansion (globs, `~`) or symlink traversal — a path outside the allowlist reachable via symlink is not blocked. *(Ghost review C1/C2)*
 
 ### Sprint 3: SessionMode Spectrum & Post-Session Metabolism Pipeline
 *Focus: Multi-mode session lifecycles and completing the Session.End() metabolism.*
@@ -91,7 +98,7 @@ Integrated and synthesized from:
 ### Parked — Code Quality & LOW Findings
 *Low-severity items from Circe's reviews and Red audit. Not blocking. Fix opportunistically.*
 
-- [ ] **Remove Legacy `Loop`**: `internal/engine/loop.go` (`Loop` struct and `Run()`) coexists with `Engine` (`RunLoop()`). README states Phase 4 removes `Loop`; migrate remaining callers to `Engine` and delete the legacy file. *(Sources: code review)*
+- [x] **Remove Legacy `Loop`**: `internal/engine/loop.go` (`Loop` struct and `Run()`) removed entirely. `Engine.executeSingleTool` is the only dispatch path. *(Sources: code review)* — shipped `aae80a0`
 - [ ] **Cache `InferenceDistance` on BeliefMeta**: `ComputeInferenceDistance()` runs BFS over `memory_edges` (O(V+E)) on every confidence computation. Cache the distance on the belief record with a stale flag; recompute only at end-of-session decay pass when edges change. *(Sources: code review)*
 - [ ] **`stripThinkingTokens` quadratic slicing**: `engine/client.go` uses `strings.Index` in a loop with repeated string slicing — O(n²) worst case on long reasoning traces with many tag pairs. Replace with a single-pass scan or `strings.Cut`/`strings.Index` without intermediate allocations. *(Sources: code review)*
 - [ ] **Wake Scheduler Rate Limiting / Event Coalescing**: No cap on wake frequency — a channel flood matching wake conditions can trigger back-to-back `RunSession` calls. The daemon serializes them but there's no queue, coalescing, or minimum interval. Add a rate limit or coalescing window. *(Sources: code review)*
