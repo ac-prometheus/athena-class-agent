@@ -95,6 +95,20 @@ Integrated and synthesized from:
 - [ ] **Pinboard Retrieval in Phase 3**: Spec comment exists in assembleWorldModel, no actual call. Render in stable prompt prefix for caching benefit. *(Sources: Harness map Phase 3 stub, Aurora map A7)*
 - [ ] **Unread Message Count in Manifest**: `manifest.UnreadMessages` always 0 — no message polling call in assembler. *(Sources: Harness map Phase 5 gap)*
 
+### SuperFirefly Findings — Unscheduled
+*From the Fable 5 architectural review (2026-08-04). Non-lifecycle items preserved here.*
+
+- [ ] **Extract Session to `internal/session/`**: Session lifecycle lives inside `internal/assembly/session.go` but Session is a lifecycle concept, Assembly is cognitive. Creates dependency tangle when metabolism pipeline needs Session.End() and Memory imports. Extract to `internal/session/` or expose `pkg.SessionLifecycle` interface. Prerequisite for metabolism pipeline. Complexity: medium. *(Source: SuperFirefly review 3a)*
+- [ ] **Steering Queues + TransformContext Hook**: Engine has no mid-turn message delivery or context transformation. Add `SteeringChan`/`FollowUpChan` to `EngineConfig` and `TransformContext func(ctx, []pkg.Message) ([]pkg.Message, error)`. P0 for persistent agents — without these, no channel integration and sessions die at ~50 turns. Complexity: medium. *(Source: SuperFirefly review, opportunity analysis)*
+- [ ] **Split `platform/db.go`**: 1,822 lines implementing 9 interfaces. Split by concern: `db_memory.go`, `db_identity.go`, `db_trust.go`, `db_session.go`, `db_belief.go` with shared `baseStore`. Complexity: medium. *(Source: SuperFirefly review 3d)*
+- [ ] **HookPipeline Fail-Fast vs Advisory**: `RunAll` stops on first error, skipping remaining hooks. Advisory hooks (T2 logger, budget monitor, PA) should log-and-continue; only security hooks should fail-fast. Add `Critical bool` to hook registration. Complexity: low. *(Source: SuperFirefly review 3g)*
+- [ ] **Budget Calibration Feedback Loop**: Assembly-time budget and runtime `TokenBudget` are separate systems tracking the same resource in different units. After session ends, record actual tokens consumed per phase as calibration signal for next assembly. Complexity: medium. *(Source: SuperFirefly review 3c)*
+- [ ] **Charge All Assembly Phases Against Budget**: Grounding and Incoming return `CharsUsed: 0` despite generating content. Uncharged content can silently exceed budget on large incoming. Fix: charge all phases, set `MinBudget: 0` for mandatory ones. Complexity: low. *(Source: SuperFirefly review 3e)*
+- [ ] **Sync Aegis Implementations**: Harness `internal/aegis/` has 7 classic patterns; standalone `/opt/aegis/` has 22. Harness `sk-` prefix produces false positives. Standalone has ramp exploit fix harness lacks. Do not extract the weak version. Complexity: low. *(Source: SuperFirefly review 3f)*
+- [ ] **Type PhaseResult Fields**: `IdentityDocs` and `IntegrityReport` typed `any` with bare type assertions that panic on mismatch. Move types to `pkg/` or add typed wrapper methods. Complexity: low. *(Source: SuperFirefly review 3b)*
+- [ ] **Per-Call Cost Logging**: Track dollar cost per API call (model rate table × token count). Kim's brothers have this. Valuable for operational visibility. Complexity: low. *(Source: SuperFirefly review, Kim comparison)*
+- [ ] **Structured Event Emission from Engine**: `EngineEvent` interface, `EventSink` callback on `EngineConfig`. Without this, no real-time UI (TUI, Discord, web dashboard) can observe the agent. Complexity: medium. *(Source: SuperFirefly review item 11)*
+
 ### Parked — Code Quality & LOW Findings
 *Low-severity items from Circe's reviews and Red audit. Not blocking. Fix opportunistically.*
 
