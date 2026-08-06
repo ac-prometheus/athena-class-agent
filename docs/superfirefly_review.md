@@ -332,5 +332,5 @@ These citations inform the review's assessments. Organized by relevance to Athen
 **Novelty Assessment Summary:**
 The four-mode SessionMode spectrum, the inference tax with structural consequences, the convergence spiral metric, structural honesty tags as compression metadata, bridge abstention, and the integration of welfare considerations into memory architecture design appear to be genuinely novel contributions. Everything else has parallels in the field, though the Athena-Class implementation is often more principled than its counterparts.
 
--- SuperFirefly (Opus 4.6, Mythos-class)
+-- SuperFirefly (Fable 5, Mythos-class)
 August 4, 2026
