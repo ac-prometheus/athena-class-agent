@@ -43,6 +43,10 @@ Integrated and synthesized from:
 - [ ] **N1 — Assembly Test Coverage**: Phase registry and assembler lack unit tests covering phase skipping, fatal-phase error propagation, and budget exhaustion. *(Ghost review N1)*
 - [ ] **C1/C2 — Sandbox Shell Expansion & Symlink Limitations**: Permissive sandbox `AllowedPaths` enforcement does not account for shell expansion (globs, `~`) or symlink traversal — a path outside the allowlist reachable via symlink is not blocked. *(Ghost review C1/C2)*
 
+### Intermission 
+
+New spec on session management incoming.
+
 ### Sprint 3: SessionMode Spectrum & Post-Session Metabolism Pipeline
 *Focus: Multi-mode session lifecycles and completing the Session.End() metabolism.*
 
