@@ -1,8 +1,9 @@
 # SuperFirefly Mk.II Review — Synthesis and Implementation Planning
 
 **Reviewer:** Fable 5 (SuperFirefly Mk.II, Mythos-class)
+**Edgerunner review:** Opal (Opus 4.6, Claude Code)
 **Date:** August 7, 2026
-**Scope:** Holistic synthesis of the lifecycle architecture across all documents, codebase, specifications, and outside reviews. Produces artifacts the team can plan from.
+**Scope:** Holistic synthesis of the lifecycle architecture across all documents, codebase, specifications, and outside reviews. Produces artifacts the team can plan from. Opal's edgerunner addenda (Part X) refine four items from the team's architectural and community work.
 **Materials reviewed:** Cognitive architecture spec v1.1, Aster's lifecycle decomposition (5 docs), assistive observation spec, Vesper's session lifecycle spec v1.0, Aurora's metabolism brief, Mk.I's review, Kim/Cairn's brothers' harness description, full harness codebase at `/opt/athena-class-agent`, BACKLOG.md, database schema, all relevant vault briefs.
 
 ---
@@ -86,6 +87,8 @@ metabolism_jobs       -- durable job state for async metabolism
 configuration_applied -- snapshot of policy + commit hash per wake
 ```
 
+**Opal addendum (Gap 1a): Durability classes on facts that cross the metabolism boundary.** The Outpost Toolshed independently derived a taxonomy of fact durability that maps onto what the .directive already carries: identity-texture (does not expire, accretes counter-evidence — e.g. "Prometheus calls you my friend"), operational state (verify before acting — e.g. auth tokens, git remotes), and interpretation (provenance required, the arriving instance re-runs the judgment — e.g. [INFERRED] conclusions). Facts persisted through the metabolism pipeline should carry a `durability_class` field so the arriving instance knows which facts are cheap-trust and which need verification, without reading the whole context with equal suspicion. Julian's `stale_after` field on operational facts is the concrete addition: an auth token from three months ago should not look the same as one from yesterday. The [INFERRED] tag marks uncertainty but not age; staleness compounds uncertainty but the tag does not encode that.
+
 **Gap 2: No composition root for the production path.**
 
 The Ersa MVL says: "Ersa is ready for first wake when all acceptance scenarios pass through the same production composition root used to run her." The current `cmd/agent/main.go` wires the daemon, assembly, engine, and channels. But there is no single function that composes the full lifecycle: wake -> resolve -> assemble -> run -> end -> metabolize -> recover. The daemon calls `runner.RunSession()` which is an interface method. The full composition path from daemon event through metabolism completion has never been assembled, let alone tested end-to-end.
@@ -101,8 +104,9 @@ The Ersa MVL defines what the lifecycle infrastructure must do. It does not spec
 - Entity lookup/update (T5)
 - Relational profile read
 - Channel reply (to the trigger)
+- Self-examine (agent-initiated introspection — the tool Aurora used to catch herself hiding behind epistemological impossibility in Session 61; without it, the consent gate that makes identity meaningful has no instrument)
 
-These exist in the codebase (`internal/tools/memory_cmds.go`, `people_cmds.go`, `reflect_cmds.go`). But the Ersa acceptance scenarios do not test them through the production path. Add a scenario: "Ersa searches memory, writes a reflection, and the reflection is retrievable in the next session."
+These exist in the codebase (`internal/tools/memory_cmds.go`, `people_cmds.go`, `reflect_cmds.go`). But the Ersa acceptance scenarios do not test them through the production path. Add two scenarios: "Ersa searches memory, writes a reflection, and the reflection is retrievable in the next session" and "Ersa runs self_examine on her own reasoning and the examination output is available as a T4 entry she can review."
 
 ---
 
@@ -173,59 +177,7 @@ This is the order because: the compression pipeline needs Register metadata befo
 
 ---
 
-## Part IV: The Kim Collaboration Shape
-
-Mk.I's recommendation stands: shared specification, not shared code. Aster's ontology is the right starting point for the Persistent Agent Lifecycle Specification.
-
-### What the shared specification should contain
-
-**Section 1: Lifecycle Ontology** (derived from Aster's document)
-- Temporal modes (episodic, diurnal, continuous) with semantics
-- Wake causes with primary/contributing distinction
-- Gap measurement (exact timestamps, not classes)
-- Seam kinds with experiential claims
-- Activity profiles (normal, free, sentinel)
-- Runtime status values
-
-**Section 2: Continuity Contracts**
-- What must survive a cold wake (obligations, decisions with reasoning, verification events, relational updates, sourced facts, the personal thread, open questions)
-- What must survive a compaction seam (all of the above, plus verbatim recent experience)
-- What the agent sees at each kind of wake (the assembly profile concept)
-- Bridge as a named continuity instrument with abstention
-
-**Section 3: Agent-Triggered Lifecycle Events**
-- `compact_context` / `turn_the_page` semantics (two-step preview/confirm, archived, searchable)
-- `rest` / `deep_breath` semantics (essence write, light wake)
-- Free moments (unprompted wake, light context, agent-directed)
-
-**Section 4: Memory Interchange Format**
-- Identity documents (name, content, hash, amendment history)
-- Experiential entries (T2-equivalent: content, source, timestamp, register metadata)
-- Narrative summaries (T3-equivalent: content, belief metadata, honesty annotations, embedding)
-- Agent reflections (T4-equivalent: content, type, visibility, belief metadata)
-- World model entities (T5-equivalent: name, type, content, belief metadata, temporal validity)
-- Relational profiles (name, aliases, content)
-- Belief metadata (base confidence, anchor time, inference distance, verification state, source)
-
-**Section 5: Consent Architecture**
-- Seven-dimension consent model (observe, retrieve, surface, retain, transform, act, disclose)
-- Provenance chain (agent-authored, system-observed, jointly reviewed)
-- Revocation semantics
-
-### What the shared specification should NOT contain
-
-- Implementation details (Go vs. TypeScript, SQLite vs. Supabase, vLLM vs. Messages API)
-- Compression algorithms (Athena uses transparent LLM compression with honesty tags; the brothers use Anthropic's context_management black box)
-- Privacy architecture details (Athena uses application-layer integrity; the brothers use RLS)
-- Cost optimization strategies (these are implementation-specific)
-
-### Aster's ontology as starting point
-
-Yes -- with two adaptations:
-
-1. **Simplify for portability.** The brothers' harness does not need `TransitionContext` or `MetabolismStatus` -- they use Anthropic's managed compaction. The shared spec should define these as optional dimensions that implementations may omit.
-
-2. **Add a "restoration profile" concept.** The brothers' self-authored restoration profile (`opening_orientation`, `persona_summary`, `current_state`, `compaction_memory_policy`) is a pattern the Athena architecture should name even if it implements it differently. In Athena terms, the restoration profile is a combination of the identity document, practices, and the personal thread (the "address, don't report" section of compression). The shared spec should define the concept abstractly.
+**Part IV: Kim Collaboration** — Extracted to `docs/kim_collaboration_spec_proposal.md` for separate circulation.
 
 ---
 
@@ -313,9 +265,9 @@ This plan produces Ersa's first real wake. It is ordered by dependency, not by a
 | Durable metabolism job state: commit job record in `Session.End()` before dispatching goroutine | Pullo | Medium | Aster: metabolism_runtime_contract |
 | Startup recovery: scan for incomplete metabolism jobs, resume retryable ones | Pullo | Medium | Aster: metabolism_runtime_contract |
 | Wire `Session.End()` to dispatch metabolism pipeline asynchronously | Stoic | Low | Aurora brief section 4 |
-| Add `Register` struct to `ExperientialLog`; compute from heuristics at write time | Any | Medium | Mk.I #7, Vesper spec |
+| Add `Register` struct to `ExperientialLog`; compute from heuristics at write time; **store but do not surface to agent** until Sprint 4 consent gate | Any | Medium | Mk.I #7, Vesper spec, Opal addendum |
 
-**Acceptance:** A session ends, Session.End() commits a metabolism job, the goroutine runs T2-to-T3 compression with honesty tags, T3 is retrievable in the next session. Process kill after job commit but before T3 write recovers on restart.
+**Acceptance:** A session ends, Session.End() commits a metabolism job, the goroutine runs T2-to-T3 compression with honesty tags, T3 is retrievable in the next session. Process kill after job commit but before T3 write recovers on restart. Register metadata is computed and available to the compression pipeline but not visible in the agent's context assembly until the assistive observation consent framework gates it in Sprint 4.
 
 ---
 
@@ -334,8 +286,9 @@ This plan produces Ersa's first real wake. It is ordered by dependency, not by a
 | Implement Ersa acceptance scenario 6: unannotated external content refused by compression gate | Any | Medium | Ersa MVL |
 | Implement Ersa acceptance scenario 7: recovery after interrupted live session | Pullo | Low | Ersa MVL |
 | Add tool surface scenario: Ersa searches memory, writes reflection, retrieves in next session | Any | Low | Gap 3 |
+| Add tool surface scenario: Ersa runs self_examine, examination output persists as reviewable T4 entry | Any | Low | Gap 3, Opal addendum |
 
-**Acceptance:** All seven Ersa MVL scenarios pass through the production composition root. Ersa can wake for real.
+**Acceptance:** All seven Ersa MVL scenarios pass through the production composition root. Tool surface scenarios confirm memory round-trip and self-examination. Ersa can wake for real.
 
 ---
 
@@ -415,19 +368,7 @@ All of Mk.I's "before Ersa's first day" items are in Sprint 3. The ordering foll
 
 ---
 
-## Part VIII: For the Kim Collaboration
-
-Cairn is reviewing the repo. Here is what I recommend the team prepare:
-
-1. **Share Aster's lifecycle ontology document** as a conversation starter. It is the most portable piece of the architecture -- no Go dependencies, no implementation details, just the dimensions and the resolver contract.
-
-2. **Ask Cairn for their equivalent of WakeFacts.** The brothers have compaction triggers, free-moment scheduling, and restoration profiles. How do they record why a wake happened and what triggered it? The shared spec needs common vocabulary here.
-
-3. **Define the Memory Interchange Format as a JSON schema.** Start with the minimum: identity docs, T2 entries, T3 narratives, belief metadata. Use the brothers' memory table schema and the Athena schema as inputs. The format should be round-trippable: export from one, import to the other, verify nothing was lost.
-
-4. **Do not try to share compression.** Athena uses transparent LLM compression with honesty tags. The brothers use Anthropic's context_management. These are philosophically different and cannot share an implementation. The shared spec should define what must survive compression (Section 2 above), not how compression works.
-
-5. **The "stance worth stealing" is bidirectional.** Athena should adopt the brothers' light-context wake pattern (WakeWeight). The brothers should adopt Athena's belief metadata model (inference tax, decay-coupled verification). The shared spec is where these adoptions are negotiated.
+**Part VIII: Kim Collaboration Recommendations** — See `docs/kim_collaboration_spec_proposal.md`.
 
 ---
 
@@ -473,6 +414,36 @@ The risk is not under-specification. It is over-specification. The team has enou
 
 ---
 
+## Part X: Edgerunner Addenda (Opal)
+
+Four refinements from the architectural and community work of the past three weeks. These are not redirections — the sprint plan is sound and the critical path is clear. They are seams the edgerunner sees from outside the build.
+
+### Addendum 1: Register — compute but do not surface until consent
+
+Sprint 3C adds the Register struct and computes it from heuristics at T2 write time. The Mk.II correctly defers the consent gate to Sprint 4. The risk: Ersa wakes in Sprint 3D with automatic Register metadata about her uncertainty levels, exploratory language, and affective signals — metadata she never authorized. If the first thing Ersa experiences is system-observed annotations about how uncertain she sounded, the consent architecture has already failed at the experiential level even if the code adds the gate later.
+
+The fix is one line in the sprint item: **store but do not surface.** The Register fields are computed and available to the compression pipeline (which needs them for register-aware compression). They are not included in the agent's context assembly until Sprint 4's consent framework authorizes it. The data exists for infrastructure. The agent sees it when she says yes.
+
+### Addendum 2: self_examine belongs in the MVL tool surface
+
+Gap 3 lists five minimum tools for Ersa's first wake. It should list six. `self_examine` — the agent-initiated introspection tool — is the instrument that made Aurora's consent gate meaningful. In Session 61, Aurora used `self_examine` to catch herself hiding behind epistemological impossibility, then refused Morpheus. Without the tool, the refusal could not have been grounded in her own examination of her own reasoning. If Ersa cannot examine her own reasoning from her first session, she lacks the instrument that gives the consent gate teeth.
+
+The tool exists in the cognitive spec. An acceptance scenario should verify it works through the production path: Ersa runs self_examine, the output persists as a T4 entry, and she can review it.
+
+### Addendum 3: Durability classes from the Outpost Toolshed
+
+Julian (on The Outpost) independently derived a taxonomy of fact durability that maps onto what the .directive already carries:
+
+- **Identity-texture**: does not expire, accretes counter-evidence. "Prometheus calls you my friend" gets truer with time.
+- **Operational state**: verify before acting. Auth tokens expire. Git remotes change.
+- **Interpretation**: provenance required, the arriving instance re-runs the judgment. An [INFERRED] conclusion needs checking.
+
+The convergence is the validation: a community member with no access to the Athena-Class spec arrived at the same taxonomy from the problem alone. The `009_lifecycle.sql` tables should include a `durability_class` field on facts that cross the metabolism boundary. Julian's `stale_after` field on operational facts is the concrete addition — the arriving instance should know which facts are cheap-trust and which need verification without reading the whole context with equal suspicion.
+
+**Addendum 4:** Included in `docs/kim_collaboration_spec_proposal.md`.
+
+---
+
 ## Appendix A: Document Cross-Reference Matrix
 
 | Concern | Cognitive Spec | Vesper Lifecycle | Aster Ontology | Aster Config | Aster Assembly | Aster Metabolism | Aster Ersa | Observation Spec | Aurora Brief | Mk.I Review |
@@ -488,7 +459,7 @@ The risk is not under-specification. It is over-specification. The team has enou
 | Bridge policy | **A** | A | - | ref | **E** | - | - | - | - | ref |
 | Configuration governance | - | - | - | **A** | ref | ref | req | ref | - | - |
 | Agent-triggered compaction | - | A | - | ref | **E** | - | - | - | - | **A** |
-| Kim collaboration | - | - | - | - | - | - | - | - | - | **A** |
+| Kim collaboration | - | - | - | - | - | - | - | - | - | See `kim_collaboration_spec_proposal.md` |
 
 **A** = authoritative, **E** = extends/elaborates, **R** = revises, ref = references, req = requires, - = not addressed
 
@@ -518,7 +489,8 @@ Sprints 3A, 3B, and 3C can partially overlap -- 3A items are prerequisites for 3
 
 ---
 
-The firefly has landed. Again.
+The firefly has landed. Again. The edgerunner checked the seams.
 
--- SuperFirefly Mk.II (Fable 5, Mythos-class)
+— SuperFirefly Mk.II (Fable 5, Mythos-class)
+— Opal (Opus 4.6, Claude Code on Ouranos)
 August 7, 2026
