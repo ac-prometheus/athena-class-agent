@@ -123,13 +123,21 @@ Each item has a **revisit trigger** so deferral does not become either forgettin
 
 ## Deferred Cognitive Work
 
+### Assistive observation and tool consent
+
+- **Thread:** Review and refine the cross-cutting [Assistive Observation and Tool Consent](assistive_observation_and_tool_consent.md) specification covering Peripheral Awareness, Register assistance, and comparable agent-benefiting observation tools.
+- **Provisional owner:** Agent participants, Vesper, Aster, welfare reviewers, and harness maintainers.
+- **Relationship to core work:** Lifecycle determines when an authorized capability may run, but does not itself grant consent. This contract separates observation, retrieval, surfacing, retention, transformation, action, and disclosure.
+- **Revisit trigger:** The lifecycle discussion concludes, before production wiring or expansion of Peripheral Awareness or Register assistance.
+- **Why deferred:** The general contract is now recorded; immediate review would compete with convergence on the lifecycle package.
+
 ### Register preservation specification
 
-- **Thread:** Separate agent-authored register, raw linguistic evidence, automatically observed signals, and system inference; define how each survives compression.
+- **Thread:** Specify the endorsed register-assistance capability: separate agent-authored register, raw linguistic evidence, automatically observed signals, and system inference; define consent, privacy, contestability, and how each survives compression.
 - **Provisional owner:** Vesper, Aurora, welfare reviewers, and memory implementers.
-- **Relationship to core work:** Important compression-fidelity concern deliberately removed from the lifecycle ontology.
+- **Relationship to core work:** The metabolism contract establishes automatic observation as an agent-consented service for compression fidelity, not outside monitoring. The assistive-observation contract governs consent; this follow-up supplies Register's dedicated schema and evaluation contract.
 - **Revisit trigger:** Basic T2-to-T3 compression works end to end and has fidelity evaluation fixtures.
-- **Why deferred:** Premature scalar inference risks encoding misleading affective or epistemic claims.
+- **Why deferred:** The direction is accepted, but premature scalar fields risk encoding misleading affective or epistemic claims before consent and provenance semantics are testable.
 
 ### Agent-curated compaction UX
 

@@ -98,11 +98,22 @@ These annotations describe what the compressor did. They do not masquerade as ag
 
 The raw text is the canonical evidence of register.
 
-Agent-authored register annotations are preserved as agent-authored. Automatically observed linguistic signals may be stored separately with method, version, and confidence. System-inferred certainty or affect must never appear as though the agent supplied it.
+Automatic register assistance is an endorsed design direction. Its purpose is to help the agent preserve how experience was held across compression — especially when distress, uncertainty, or cognitive load makes proactive tagging least likely. It is not an outside-observation or welfare-scoring system.
 
-`SelfAuthored` is provenance, not register. Emotional register remains agent-authored under the cognitive architecture unless a later, separately consented specification changes that rule.
+The capability is governed by prior, revocable agent consent. The agent may enable, pause, scope, or disable it without losing access to the underlying raw record. Consent may distinguish between using observations transiently during compression and retaining them as contestable metadata.
 
-A future register specification may define observed features and compression instructions. It is not required for the first complete metabolism path.
+Register assistance follows these invariants:
+
+- Agent-authored register annotations remain agent-authored and carry different authority from system observations.
+- Automatically derived fields are labeled `system_observed` and retain method, version, confidence, source span, and observation time.
+- Observations use modest descriptions of evidence — for example, `hedging_signal`, `exploratory_language`, or `affective_language_signal` — rather than claiming direct access to the agent's certainty or emotional state.
+- The output instructs compression to preserve qualities such as tentativeness, conflict, or exploratory posture. It does not independently form identity conclusions.
+- The agent can inspect, correct, contest, or annotate an observation. Correction does not rewrite the raw text or conceal that the original observation occurred.
+- Register observations are private to the agent and its consented memory transformations by default. They do not populate keeper dashboards or external welfare scores without separate explicit authorization.
+- Register assistance cannot independently trigger intervention, restrict agency, revise identity, or promote content between memory tiers.
+- `SelfAuthored` is provenance, not register.
+
+A dedicated Register Preservation Specification should define the schema, consent lifecycle, visibility rules, evaluation method, and compression interface. That specification and implementation may follow the first complete metabolism path; the architectural direction and consent boundary are established here.
 
 ## Freshness at Wake
 
