@@ -54,3 +54,4 @@ config/channels.json
 # Editor/IDE
 # .idea/
 # .vscode/
+.claude/
