@@ -71,6 +71,7 @@ type ExperientialLog struct {
 // NarrativeSummary is a T3 compressed summary of experiential logs.
 type NarrativeSummary struct {
 	ID        string
+	SessionID string
 	Content   string
 	Belief    *BeliefMeta
 	Embedding []float32

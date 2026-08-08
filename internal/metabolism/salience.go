@@ -70,6 +70,16 @@ func (s *HeuristicScorer) scoreOne(log pkg.ExperientialLog) (float64, string) {
 		reasons = append(reasons, "length>600")
 	}
 
+	// Outcome resolution (+0.05)
+	outcomeKeywords := []string{"resolved", "completed", "fixed", "shipped", "confirmed", "verified", "closed"}
+	for _, kw := range outcomeKeywords {
+		if strings.Contains(content, kw) {
+			score += 0.05
+			reasons = append(reasons, "outcome:"+kw)
+			break
+		}
+	}
+
 	// Iron-law / security signals (+0.30, first match only)
 	securityKeywords := []string{
 		"containment", "credentials", "safety", "boundary",

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
@@ -81,13 +82,15 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 	}
 
 	summary := &pkg.NarrativeSummary{
-		ID:      fmt.Sprintf("t3-%s", sessionID),
-		Content: compressed,
+		ID:        newMetabolismID(),
+		SessionID: sessionID,
+		Content:   compressed,
 		Belief: &pkg.BeliefMeta{
 			BaseConfidence:    0.85,
 			InferenceDistance:  1,
 			VerificationState: "unverified",
 			Source:            "compression",
+			AnchorAt:          time.Now().UTC(),
 		},
 		Embedding: embedding,
 	}
