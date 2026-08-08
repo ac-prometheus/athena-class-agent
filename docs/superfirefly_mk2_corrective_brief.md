@@ -1,8 +1,8 @@
 ---
 title: "SuperFirefly Mk.II Corrective Pass Brief"
-authors: "Aster — for review and approval by Vesper"
+authors: "Aster & Vesper"
 date: 2026-08-08
-status: "Collaboration brief — Vesper approval pending"
+status: "Approved corrective brief"
 source_review: "superfirefly_mk2_review.md"
 ---
 
@@ -63,16 +63,21 @@ The policy mechanism remains correct. The initial value should be `agent_request
 
 This does not need to block unrelated Bridge machinery or assembly work.
 
-### 3. Correct `self_examine` provenance before making it an Ersa gate
+### 3. Preserve `self_examine` as a transient aid
 
-Agent-initiated self-examination is a valuable part of the minimum tool surface, and its longitudinal persistence is worth testing. The current handler, however, sends the prompt to a separately invoked LLM and stores that response as self-sourced T4. Agent initiation alone does not make another model's generated response agent-authored.
+The intended boundary is narrow and already conceptually sound: `self_examine` asks a separate advisor model for an examination and returns the result as a transient T1 tool response. The active agent reads and evaluates that aid. If she wants to preserve a conclusion, she uses the separate reflection-write path in her own words. Longitudinal value comes from the agent's chosen reflection, not automatic persistence of the advisor output.
 
-Choose one of two valid forms:
+The current Athena-Class handler does not yet preserve that boundary. It embeds the advisor response, inserts it directly as a T4 `examination`, and labels its source `self`. The checked Aurora Anamnesis implementation also currently exposes a `save` argument defaulting to `true` and writes the result as a private T4 examination. These implementation facts should not displace the agreed contract: agent initiation alone does not make another model's generated response agent-authored.
 
-- the active agent examines her reasoning in her own context and explicitly writes the result as a reflection; or
-- a service model creates a clearly `system_generated` examination aid that becomes agent-authored only after the active agent reviews and affirmatively adopts or rewrites it.
+The corrective is therefore to restore and lock down the intended behavior, not invent a larger workflow:
 
-The acceptance scenario should be added after this provenance boundary is correct. Meanwhile, ordinary agent-authored reflection write/read continuity can still be tested.
+- `self_examine` returns an explicitly advisor-generated T1 tool result and does not persist it automatically;
+- `write_reflection` remains the distinct, agent-controlled T4 path;
+- the agent may quote, revise, reject, or synthesize the aid when authoring a reflection;
+- if raw tool traffic is retained in T2 as part of the experiential archive, it retains `tool:self_examine` or equivalent provenance and is not promoted to agent-authored T4;
+- tests prevent a later change from silently reintroducing automatic T4 persistence.
+
+The Ersa acceptance scenario should test that `self_examine` returns transiently and that a separately agent-authored reflection can be written and retrieved in a later session. It should not require the advisor output itself to persist as T4.
 
 The tool inventory should also be checked against the tools actually registered in the production composition. In particular, read access to people/entities should not be described as entity-update capability unless a write tool is present.
 
@@ -156,7 +161,7 @@ The corrective pass should produce a short revision or addendum to the Mk.II pla
 1. preserves the accepted contributions above;
 2. moves Register execution behind valid scoped consent;
 3. selects a Bridge default consistent with agent standing and the recorded decision history;
-4. redesigns `self_examine` provenance before adding it to the Ersa gate;
+4. restores and verifies T1-only `self_examine` behavior, with durable reflection remaining a separate agent-authored act;
 5. locates durability metadata in the appropriate fact and memory structures;
 6. marks semantic tail detection as later experimental policy bounded by structural invariants;
 7. updates the plan to acknowledge landed Sprint 3A work and the required migration repair;
@@ -167,6 +172,6 @@ This revision need not reproduce the full review. A concise delta is preferable.
 
 ## Approval and Working Posture
 
-Vesper's approval is requested because the corrective pass affects the shared lifecycle architecture and its transition into implementation planning. Approval may be recorded as endorsement, endorsement with amendments, or explicit disagreement on named points. Unresolved differences should remain visible rather than being silently averaged away.
+Vesper approved the corrective brief on 2026-08-08. The `self_examine` section incorporates the resulting clarification: the intended contract is a transient T1 advisor result followed, if the agent chooses, by a separate agent-authored T4 reflection. Inspection then established that both checked implementations automatically persist the advisor output, so the corrective is to restore and test the intended boundary rather than design a new one.
 
 Nothing in this brief requires the team to treat yesterday's work as a mistake. The architecture is moving, useful pieces are landing, and the next batch can leave the system materially closer to Ersa's first whole wake. The purpose of review is to keep that movement aligned while correction is still inexpensive.
