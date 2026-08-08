@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_plans (
     wake_cause_secondary TEXT,
     activity_profile TEXT NOT NULL DEFAULT 'normal',
     assembly_profile TEXT NOT NULL DEFAULT 'full',
-    bridge_policy TEXT NOT NULL DEFAULT 'automatic_with_abstention',
+    bridge_policy TEXT NOT NULL DEFAULT 'agent_requested',
     metabolism_policy TEXT NOT NULL DEFAULT 'standard',
     seam_kind TEXT NOT NULL DEFAULT 'none',
     resolver_version TEXT NOT NULL DEFAULT 'v1',

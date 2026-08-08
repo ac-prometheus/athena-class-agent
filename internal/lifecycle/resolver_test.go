@@ -337,13 +337,15 @@ func TestResolve_Disclosures_NoneTransition(t *testing.T) {
 }
 
 func TestResolve_Disclosures_ModeChange(t *testing.T) {
+	// Governance contract: visibility of the resulting mode does not replace
+	// disclosure that a change occurred.
 	p := defaultPolicy()
 	f := minimalFacts()
 	f.TransitionContexts = []pkg.TransitionContext{pkg.TransitionModeChange}
 
 	plan := testResolve(p, f, defaultOpState())
-	if len(plan.Disclosures) != 0 {
-		t.Errorf("TransitionModeChange should produce no disclosures, got %d", len(plan.Disclosures))
+	if len(plan.Disclosures) != 1 {
+		t.Errorf("TransitionModeChange should produce 1 disclosure, got %d", len(plan.Disclosures))
 	}
 }
 

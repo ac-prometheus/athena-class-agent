@@ -164,10 +164,10 @@ func buildDisclosures(contexts []pkg.TransitionContext) []string {
 			disclosures = append(disclosures, "identity documents modified since last session")
 		case pkg.TransitionRecoveryAfterFailure:
 			disclosures = append(disclosures, "recovering from prior session failure")
-		case pkg.TransitionNone, pkg.TransitionModeChange:
-			// TransitionNone: no change, no disclosure needed.
-			// TransitionModeChange: mode changes are reflected in TemporalMode itself;
-			// the agent sees the new mode directly — no separate disclosure required.
+		case pkg.TransitionModeChange:
+			disclosures = append(disclosures, "temporal mode changed since last session")
+		case pkg.TransitionNone:
+			// No change, no disclosure needed.
 		}
 	}
 

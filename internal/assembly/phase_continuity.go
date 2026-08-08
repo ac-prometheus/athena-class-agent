@@ -85,9 +85,11 @@ func (p *ContinuityPhase) assembleContinuity(
 		}
 
 		bridgeAllowed := cfg.llmFn != nil && recentNarrative != ""
-		if bridgeAllowed && cfg.Plan != nil {
-			switch cfg.Plan.BridgePolicy {
-			case pkg.BridgeDisabled, pkg.BridgeAgentRequested:
+		if bridgeAllowed {
+			if cfg.Plan == nil {
+				bridgeAllowed = false
+				slog.Info("assembly: bridge skipped — no lifecycle plan (conservative default)")
+			} else if cfg.Plan.BridgePolicy != pkg.BridgeAutoWithAbstention {
 				bridgeAllowed = false
 				slog.Info("assembly: bridge skipped per lifecycle policy", "policy", cfg.Plan.BridgePolicy)
 			}
