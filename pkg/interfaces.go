@@ -6,6 +6,17 @@ import (
 	"time"
 )
 
+// SessionLifecycle manages agent session state from wake to metabolism dispatch.
+type SessionLifecycle interface {
+	Start(agentName, wakeReason string) error
+	End() error
+	RecordTurn(promptToks, completionToks int)
+	WriteCheckpoint() error
+	GetID() string
+	GetState() SessionState
+	TurnCount() int
+}
+
 // LLMClient is the interface all LLM provider implementations must satisfy.
 // Embedding is intentionally NOT on this interface — it is async and off the hot path.
 // Callers use EmbeddingProvider directly.

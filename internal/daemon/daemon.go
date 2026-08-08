@@ -5,8 +5,8 @@ import (
 	"log/slog"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
-	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
+	"github.com/ac-prometheus/athena-class-agent/internal/session"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -106,7 +106,7 @@ func (d *Daemon) scanInterruptedSessions(ctx context.Context) []string {
 	if d.db == nil {
 		return nil
 	}
-	interrupted, err := assembly.CheckpointScan(ctx, d.db)
+	interrupted, err := session.CheckpointScan(ctx, d.db)
 	if err != nil {
 		slog.Warn("daemon: checkpoint scan failed", "err", err)
 		return nil

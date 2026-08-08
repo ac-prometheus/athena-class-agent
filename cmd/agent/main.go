@@ -7,10 +7,11 @@ import (
 	"net/url"
 	"os"
 
+	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/internal/daemon"
 	"github.com/ac-prometheus/athena-class-agent/internal/engine"
-	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
+	"github.com/ac-prometheus/athena-class-agent/internal/session"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -86,7 +87,7 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 	}
 	systemPrompt := assembled.SystemPrompt
 
-	session := assembly.NewSession(r.cfg.AgentName, wakeReason, nil)
+	sess := session.NewSession(r.cfg.AgentName, wakeReason, nil)
 	budget := assembly.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)
 	hooks := engine.NewHookPipeline()
 
@@ -109,7 +110,7 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 		return fmt.Errorf("running turn: %w", err)
 	}
 
-	session.RecordTurn(turn.Response.PromptTokens, turn.Response.CompletionTokens)
+	sess.RecordTurn(turn.Response.PromptTokens, turn.Response.CompletionTokens)
 	level := budget.Add(turn.Response.PromptTokens, turn.Response.CompletionTokens)
 
 	slog.Info("agent: turn result",
@@ -120,8 +121,8 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 
 	// Run post-turn hooks (no hooks registered in Phase 1).
 	hookErr := hooks.RunAll(ctx, engine.TurnResult{
-		SessionID:        session.ID,
-		TurnNumber:       session.TurnCount,
+		SessionID:        sess.GetID(),
+		TurnNumber:       sess.TurnCount(),
 		Content:          turn.Response.TextContent(),
 		PromptTokens:     turn.Response.PromptTokens,
 		CompletionTokens: turn.Response.CompletionTokens,
@@ -133,11 +134,11 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 		return fmt.Errorf("post-turn hooks: %w", hookErr)
 	}
 
-	if err := session.WriteCheckpoint(); err != nil {
+	if err := sess.WriteCheckpoint(); err != nil {
 		return fmt.Errorf("writing checkpoint: %w", err)
 	}
 
-	session.End()
+	sess.End()
 	return nil
 }
 
