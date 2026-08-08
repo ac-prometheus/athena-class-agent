@@ -1,6 +1,10 @@
 package assembly
 
-import "context"
+import (
+	"context"
+
+	"github.com/ac-prometheus/athena-class-agent/internal/identity"
+)
 
 // Phase is a single stage of context assembly. Phases are executed in Priority
 // order to build the agent's Tier 1 working memory. The registry enables
@@ -20,9 +24,9 @@ type PhaseResult struct {
 
 	// Structured outputs for phases that return more than content.
 	// nil when not applicable. Avoids type-asserting concrete phase types.
-	IdentityDocs    any  // *identity.IdentityDocs when set by identity phase
-	IntegrityReport any  // *identity.IntegrityReport when set by identity phase
-	BridgeAbstained bool // set by continuity phase
+	IdentityDocs    *identity.IdentityDocs    // set by identity phase
+	IntegrityReport *identity.IntegrityReport // set by identity phase
+	BridgeAbstained bool                      // set by continuity phase
 }
 
 // PhaseRegistry is an ordered list of phases, sorted by Priority.
