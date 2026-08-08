@@ -71,6 +71,8 @@ func run() error {
 		RunSession(wakeReason string, inbandNotes []string) error
 	}
 	var runner sessionRunner
+	var db platform.DB
+	var driverName string
 	if os.Getenv("PHASE1_MODE") == "true" {
 		slog.Info("agent: running in phase1 compatibility mode")
 		runner = &phase1Runner{
@@ -80,8 +82,7 @@ func run() error {
 		}
 	} else {
 		// Open DB for lifecycle state. Gracefully degrade to nil if unavailable.
-		var db platform.DB
-		driverName := driverNameFromDSN(cfg.DatabaseDSN)
+		driverName = driverNameFromDSN(cfg.DatabaseDSN)
 		if store, err := platform.NewStore(cfg.DatabaseDSN); err != nil {
 			slog.Warn("agent: DB unavailable — lifecycle runner will skip persistence", "err", err)
 		} else {
@@ -112,6 +113,10 @@ func run() error {
 		AgentName:      cfg.AgentName,
 		SessionTrigger: cfg.SessionTrigger,
 	}, runner)
+
+	if db != nil {
+		d.WithDB(db, driverName)
+	}
 
 	return d.Run(context.Background())
 }
@@ -195,7 +200,7 @@ func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) er
 	opState := queryOperationalState(ctx, r.db)
 
 	// 5. Resolve lifecycle plan — purely functional, no I/O.
-	plan := lifecycle.Resolve(pkgPolicy, facts, opState, mustRandHex(16), time.Now().UTC())
+	plan := lifecycle.Resolve(pkgPolicy, facts, opState, mustRandHex(16), wakeAt.UTC())
 
 	// 6. Create session.
 	sess := session.NewSession(r.cfg.AgentName, string(plan.WakeCause), r.db)

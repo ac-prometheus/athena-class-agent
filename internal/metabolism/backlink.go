@@ -48,7 +48,7 @@ func AtomicT2T3Link(ctx context.Context, db platform.DB, driverName string, narr
 	beliefJSON := beliefMetaJSON(narrative.Belief)
 	insertQ := narrativeInsertSQL(driverName)
 	if _, err := tx.ExecContext(ctx, insertQ,
-		narrative.ID, "", narrative.Content, beliefJSON,
+		narrative.ID, narrative.SessionID, narrative.Content, beliefJSON,
 	); err != nil {
 		return fmt.Errorf("metabolism: inserting T3 narrative %s: %w", narrative.ID, err)
 	}
