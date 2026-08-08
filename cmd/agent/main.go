@@ -2,14 +2,21 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"database/sql"
+	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/internal/daemon"
 	"github.com/ac-prometheus/athena-class-agent/internal/engine"
+	"github.com/ac-prometheus/athena-class-agent/internal/lifecycle"
+	"github.com/ac-prometheus/athena-class-agent/internal/metabolism"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/internal/session"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
@@ -57,10 +64,48 @@ func run() error {
 
 	assembler := assembly.NewContextAssembler(cfg.IdentityDir, cfg.TokenBudget)
 
-	runner := &phase1Runner{
-		cfg:       cfg,
-		client:    client,
-		assembler: assembler,
+	// PHASE1_MODE=true gates the legacy single-turn runner for backward compat.
+	// Default is the full lifecycle runner.
+	// sessionRunner is unexported in daemon; use an anonymous interface here.
+	type sessionRunner interface {
+		RunSession(wakeReason string, inbandNotes []string) error
+	}
+	var runner sessionRunner
+	if os.Getenv("PHASE1_MODE") == "true" {
+		slog.Info("agent: running in phase1 compatibility mode")
+		runner = &phase1Runner{
+			cfg:       cfg,
+			client:    client,
+			assembler: assembler,
+		}
+	} else {
+		// Open DB for lifecycle state. Gracefully degrade to nil if unavailable.
+		var db platform.DB
+		driverName := driverNameFromDSN(cfg.DatabaseDSN)
+		if store, err := platform.NewStore(cfg.DatabaseDSN); err != nil {
+			slog.Warn("agent: DB unavailable — lifecycle runner will skip persistence", "err", err)
+		} else {
+			db = platform.WrapSQLDB(store.DB)
+		}
+
+		// Pipeline is nil when no T2QueryStore is available (no DB or no memory store).
+		// TODO: wire T2QueryStore (platform.NewMemoryStore) in Phase 4+ when always available.
+		var pipeline *metabolism.Pipeline
+		if db != nil {
+			// NewPipeline needs a T2QueryStore; defer until MemoryStore is wired.
+			// For now pass nil — CommitJob will still record the job, goroutine skipped.
+			pipeline = nil
+		}
+
+		runner = &lifecycleRunner{
+			cfg:        cfg,
+			client:     client,
+			assembler:  assembler,
+			db:         db,
+			driverName: driverName,
+			pipeline:   pipeline,
+			gateway:    nil, // TODO: wire Aegis gateway in Phase 5
+		}
 	}
 
 	d := daemon.New(daemon.Config{
@@ -71,7 +116,184 @@ func run() error {
 	return d.Run(context.Background())
 }
 
-// phase1Runner implements daemon.sessionRunner for the Phase 1 single-turn loop.
+// ---------------------------------------------------------------------------
+// lifecycleRunner — full session lifecycle composition root (Sprint 3B+)
+// ---------------------------------------------------------------------------
+
+// lifecycleRunner implements daemon.SessionRunner with full lifecycle resolution,
+// context assembly, engine loop, and end-of-session metabolism dispatch.
+type lifecycleRunner struct {
+	cfg        *platform.Config
+	client     pkg.LLMClient
+	assembler  *assembly.ContextAssembler
+	db         platform.DB
+	driverName string
+	pipeline   *metabolism.Pipeline
+	gateway    pkg.ContentGateway // Aegis, may be nil
+}
+
+// RunSession executes a full agent session: resolve lifecycle plan → assemble
+// context → run engine loop → end session → dispatch metabolism.
+func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) error {
+	ctx := context.Background()
+
+	// 1. Read policy from workspace file. Missing file is not an error — use defaults.
+	policyReader := session.NewPolicyReader(r.cfg.WorkspaceDir, r.db)
+	localPolicy, policyHash, err := policyReader.Read()
+	if err != nil {
+		slog.Warn("lifecycle: policy read error — using defaults", "err", err)
+		localPolicy = nil
+		policyHash = ""
+	}
+	pkgPolicy := localPolicyToPkg(localPolicy, policyHash)
+
+	// 2. Check for policy change and produce a disclosure note if changed.
+	var disclosureNote string
+	if localPolicy != nil {
+		changed, prevHash, changeErr := policyReader.HasChanged(ctx, policyHash)
+		if changeErr != nil {
+			slog.Warn("lifecycle: policy change check failed", "err", changeErr)
+		} else if changed {
+			disclosure := session.GenerateDisclosure(nil, localPolicy)
+			disclosure.PolicyPath = policyReader.PolicyPath()
+			disclosure.OldHash = prevHash
+			disclosure.NewHash = policyHash
+			disclosureNote = disclosure.ForContext()
+			slog.Info("lifecycle: policy change detected",
+				"new_hash", policyHash, "prev_hash", prevHash)
+		}
+	}
+
+	// 3. Build WakeFacts.
+	wakeAt := time.Now()
+	wakeCause := wakeReasonToCause(wakeReason)
+
+	var prevActivityAt *time.Time
+	if r.db != nil {
+		prevActivityAt = queryLastWakeAt(ctx, r.db)
+	}
+
+	var elapsed time.Duration
+	if prevActivityAt != nil {
+		elapsed = wakeAt.Sub(*prevActivityAt)
+	}
+
+	facts := pkg.WakeFacts{
+		PrimaryCause: wakeCause,
+		GapFacts: pkg.GapFacts{
+			PreviousActivityAt: prevActivityAt,
+			WakeAt:             wakeAt,
+			ElapsedDuration:    elapsed,
+			ClockBasis:         "wall",
+			GapClass:           classifyGap(elapsed, prevActivityAt),
+		},
+		ElapsedDuration: elapsed,
+		SeamKind:        classifySeam(elapsed, prevActivityAt),
+	}
+
+	// 4. Build OperationalState from DB. Use zero-value on failure (graceful degradation).
+	opState := queryOperationalState(ctx, r.db)
+
+	// 5. Resolve lifecycle plan — purely functional, no I/O.
+	plan := lifecycle.Resolve(pkgPolicy, facts, opState, mustRandHex(16), time.Now().UTC())
+
+	// 6. Create session.
+	sess := session.NewSession(r.cfg.AgentName, string(plan.WakeCause), r.db)
+
+	// 7. Backfill SessionID into plan (resolver intentionally leaves it empty).
+	plan.SessionID = sess.GetID()
+
+	// 8. Build AssembleConfig. Merge inband notes with any disclosure generated above.
+	notes := make([]string, 0, len(inbandNotes)+1)
+	notes = append(notes, inbandNotes...)
+	if disclosureNote != "" {
+		notes = append(notes, disclosureNote)
+	}
+
+	assembleCfg := assembly.MinimalAssembleConfig()
+	assembleCfg.Plan = plan
+	assembleCfg.SessionID = sess.GetID()
+	assembleCfg.InbandNotes = notes
+	assembleCfg.DB = r.db
+	assembleCfg.SkipWitnessCheck = r.cfg.SkipWitnessCheck
+
+	// 9. Assemble context. Identity phase failure is fatal.
+	assembled, err := r.assembler.Assemble(ctx, assembleCfg)
+	if err != nil {
+		return fmt.Errorf("lifecycle: assembling context: %w", err)
+	}
+
+	// 10. Create engine with hooks and run the agentic loop.
+	budget := assembly.NewTokenBudget(r.cfg.TokenBudget, r.cfg.HardFloorTokens)
+	hooks := engine.NewHookPipeline()
+	hooks.Register(engine.NewBudgetMonitorHook(budget))
+	// TODO: register T2LoggerHook once MemoryStore is always wired (Phase 4+):
+	//   hooks.Register(engine.NewT2LoggerHook(memStore))
+
+	eng := engine.NewEngine(r.client, nil, hooks)
+	if r.gateway != nil {
+		eng.WithAegis(r.gateway)
+	}
+
+	req := pkg.CompletionRequest{
+		System: assembled.SystemPrompt,
+		Messages: []pkg.Message{
+			{Role: "user", Content: "[session start]"},
+		},
+		MaxTokens: 4096,
+	}
+
+	loopResult, err := eng.RunLoop(ctx, req, engine.EngineConfig{
+		MaxIterations: 25,
+		ParallelTools: true,
+		ShouldStop: func(resp *pkg.CompletionResponse, _ []pkg.ToolResult) bool {
+			// Halt early when the hard budget floor is reached.
+			level := budget.Add(resp.PromptTokens, resp.CompletionTokens)
+			return level == assembly.BudgetHard
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("lifecycle: engine loop: %w", err)
+	}
+	slog.Info("lifecycle: engine loop complete",
+		"iterations", loopResult.Iterations,
+		"terminated", loopResult.Terminated,
+		"tokens_remaining", budget.Remaining(),
+	)
+
+	// 11. End session.
+	if err := sess.End(); err != nil {
+		return fmt.Errorf("lifecycle: session end: %w", err)
+	}
+
+	// 12. Dispatch metabolism: commit a durable job record first, then run async.
+	if r.db != nil {
+		job, jobErr := metabolism.CommitJob(ctx, r.db, r.driverName, sess.GetID(), "standard")
+		if jobErr != nil {
+			slog.Warn("lifecycle: metabolism job commit failed — skipping pipeline",
+				"session", sess.GetID(), "err", jobErr)
+		} else {
+			slog.Info("lifecycle: metabolism job committed", "job_id", job.ID, "session", sess.GetID())
+			if r.pipeline != nil {
+				go func() {
+					if pErr := r.pipeline.ProcessSession(context.Background(), sess.GetID()); pErr != nil {
+						slog.Error("lifecycle: metabolism pipeline error",
+							"session", sess.GetID(), "err", pErr)
+					}
+				}()
+			}
+		}
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// phase1Runner — legacy single-turn connectivity runner
+// ---------------------------------------------------------------------------
+
+// phase1Runner implements daemon.SessionRunner for the Phase 1 single-turn loop.
+// Kept as a fallback gated by PHASE1_MODE=true.
 type phase1Runner struct {
 	cfg       *platform.Config
 	client    pkg.LLMClient
@@ -142,6 +364,175 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 		return fmt.Errorf("session end: %w", err)
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions
+// ---------------------------------------------------------------------------
+
+// localPolicyToPkg converts the session-layer LifecyclePolicy (file-parsed) to
+// the pkg.LifecyclePolicy that the lifecycle resolver expects.
+// Fields with no direct counterpart (ActivityProfile, CommitHash) use defaults.
+func localPolicyToPkg(p *session.LifecyclePolicy, hash string) pkg.LifecyclePolicy {
+	out := pkg.LifecyclePolicy{
+		TemporalMode:    pkg.TemporalEpisodic,   // safe default
+		DefaultAssembly: pkg.AssemblyFull,         // safe default
+		BridgePolicy:    pkg.BridgeAgentRequested, // corrective delta 2026-08-08
+		ActivityProfile: pkg.ActivityNormal,
+		CommitHash:      hash,
+	}
+	if p == nil {
+		return out
+	}
+	if p.TemporalMode != "" {
+		out.TemporalMode = pkg.TemporalMode(p.TemporalMode)
+	}
+	if p.AssemblyProfile != "" {
+		out.DefaultAssembly = pkg.AssemblyProfile(p.AssemblyProfile)
+	}
+	if p.BridgePolicy != "" {
+		out.BridgePolicy = pkg.BridgePolicy(p.BridgePolicy)
+	}
+	return out
+}
+
+// wakeReasonToCause maps the daemon's freeform wake reason string to a
+// canonical pkg.WakeCause. Unknown reasons default to WakeCauseScheduled.
+func wakeReasonToCause(reason string) pkg.WakeCause {
+	switch {
+	case reason == "initial" || reason == "first-boot":
+		return pkg.WakeCauseInitial
+	case reason == "recovery":
+		return pkg.WakeCauseRecovery
+	case reason == "heartbeat" || reason == "daemon-startup":
+		return pkg.WakeCauseScheduled
+	case reason == "agent_requested" || reason == "agent-requested":
+		return pkg.WakeCauseAgentRequested
+	case reason == "context_pressure" || reason == "context-pressure":
+		return pkg.WakeCauseContextPressure
+	case reason == "manual":
+		return pkg.WakeCauseManual
+	case strings.HasPrefix(reason, "channel:"):
+		return pkg.WakeCauseExternal
+	default:
+		return pkg.WakeCauseScheduled
+	}
+}
+
+// classifyGap bins an elapsed duration into a GapClass.
+// prevActivityAt == nil implies this is the first session ever (GapNone).
+func classifyGap(elapsed time.Duration, prevActivityAt *time.Time) pkg.GapClass {
+	if prevActivityAt == nil {
+		return pkg.GapNone
+	}
+	switch {
+	case elapsed < 2*time.Hour:
+		return pkg.GapShort
+	case elapsed < 16*time.Hour:
+		return pkg.GapOvernight
+	default:
+		return pkg.GapLong
+	}
+}
+
+// classifySeam maps observed gap facts to a SeamKind.
+// Context compaction is detected by the daemon/keeper before calling RunSession
+// and passed via wakeReason; here we use elapsed duration as a proxy.
+func classifySeam(elapsed time.Duration, prevActivityAt *time.Time) pkg.SeamKind {
+	if prevActivityAt == nil {
+		return pkg.SeamColdWake
+	}
+	switch {
+	case elapsed < 30*time.Minute:
+		return pkg.SeamWarmReturn
+	case elapsed < 16*time.Hour:
+		return pkg.SeamRestReturn
+	default:
+		return pkg.SeamColdWake
+	}
+}
+
+// queryLastWakeAt returns the most recent wake_at from wake_facts, or nil if
+// the table is absent, empty, or the DB is unavailable.
+// This serves as a best-effort proxy for the previous session's end time.
+func queryLastWakeAt(ctx context.Context, db platform.DB) *time.Time {
+	if db == nil {
+		return nil
+	}
+	row := db.QueryRowContext(ctx,
+		`SELECT wake_at FROM wake_facts ORDER BY wake_at DESC LIMIT 1`,
+	)
+	var t time.Time
+	if err := row.Scan(&t); err != nil {
+		if err != sql.ErrNoRows {
+			slog.Debug("lifecycle: queryLastWakeAt error (table may not exist yet)", "err", err)
+		}
+		return nil
+	}
+	return &t
+}
+
+// queryOperationalState reads the previous session's runtime and metabolism
+// status from the DB for resolver input. Returns zero-value on any error —
+// the resolver handles the empty case gracefully.
+func queryOperationalState(ctx context.Context, db platform.DB) pkg.OperationalState {
+	if db == nil {
+		return pkg.OperationalState{}
+	}
+
+	// Query last metabolism job status.
+	var metaStatus pkg.MetabolismStatus
+	metaRow := db.QueryRowContext(ctx,
+		`SELECT status FROM metabolism_jobs ORDER BY created_at DESC LIMIT 1`,
+	)
+	var rawStatus string
+	if err := metaRow.Scan(&rawStatus); err == nil {
+		metaStatus = pkg.MetabolismStatus(rawStatus)
+	}
+
+	// Query last session checkpoint state as a proxy for prior runtime status.
+	var runtimeStatus pkg.RuntimeStatus
+	cpRow := db.QueryRowContext(ctx,
+		`SELECT state FROM session_checkpoints ORDER BY created_at DESC LIMIT 1`,
+	)
+	var rawState string
+	if err := cpRow.Scan(&rawState); err == nil {
+		switch rawState {
+		case "interrupted":
+			runtimeStatus = pkg.RuntimeInterrupted
+		case "active":
+			// An active checkpoint from a prior run = interrupted session.
+			runtimeStatus = pkg.RuntimeInterrupted
+		default:
+			runtimeStatus = pkg.RuntimeEnded
+		}
+	}
+
+	return pkg.OperationalState{
+		PriorRuntimeStatus:    runtimeStatus,
+		PriorMetabolismStatus: metaStatus,
+	}
+}
+
+// mustRandHex generates n random bytes and returns them as a hex string.
+// Panics on crypto/rand failure — a broken OS RNG is not recoverable.
+func mustRandHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic("main: crypto/rand failure generating ID: " + err.Error())
+	}
+	return hex.EncodeToString(b)
+}
+
+// driverNameFromDSN returns the database driver name ("sqlite3" or "postgres")
+// from the DSN prefix. Returns "sqlite3" for unknown prefixes as a safe default.
+func driverNameFromDSN(dsn string) string {
+	switch {
+	case strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://"):
+		return "postgres"
+	default:
+		return "sqlite3"
+	}
 }
 
 // redactDSN removes credentials from a DSN for logging.

@@ -267,7 +267,7 @@ func TestProcessSession_OrdinaryEpisodicReturn(t *testing.T) {
 		return "Compressed narrative: architecture decisions and config parser insights.", nil
 	}
 
-	pipeline := NewPipeline(store, gateway)
+	pipeline := NewPipeline(store, gateway, nil, nil, nil, "")
 	pipeline.WithDB(db, "sqlite3")
 	pipeline.WithCompression(memStore, llmFn, nil)
 
@@ -302,7 +302,7 @@ func TestProcessSession_NoLogs_SkipsCompression(t *testing.T) {
 	store := newMockT2Store() // no logs
 	db := newMockDB()
 
-	pipeline := NewPipeline(store, &mockGateway{})
+	pipeline := NewPipeline(store, &mockGateway{}, nil, nil, nil, "")
 	pipeline.WithDB(db, "sqlite3")
 	pipeline.WithCompression(&mockMemoryStore{}, func(s string) (string, error) {
 		t.Fatal("LLM should not be called when there are no logs")
@@ -336,7 +336,7 @@ func TestProcessSession_CompressionFailure_ReturnsError(t *testing.T) {
 		return "", fmt.Errorf("LLM service unavailable")
 	}
 
-	pipeline := NewPipeline(store, &mockGateway{})
+	pipeline := NewPipeline(store, &mockGateway{}, nil, nil, nil, "")
 	pipeline.WithDB(db, "sqlite3")
 	pipeline.WithCompression(&mockMemoryStore{}, llmFn, nil)
 
@@ -545,7 +545,7 @@ func TestProcessSession_SalienceScoresAllLogs(t *testing.T) {
 	})
 
 	// Pipeline without compression deps — just tests Phase 1 runs.
-	pipeline := NewPipeline(store, &mockGateway{})
+	pipeline := NewPipeline(store, &mockGateway{}, nil, nil, nil, "")
 
 	err := pipeline.ProcessSession(ctx, sessionID)
 	if err != nil {

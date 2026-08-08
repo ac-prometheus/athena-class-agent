@@ -24,11 +24,25 @@ type Pipeline struct {
 }
 
 // NewPipeline creates a metabolism pipeline with the given dependencies.
-func NewPipeline(store pkg.T2QueryStore, aegis pkg.ContentGateway) *Pipeline {
+// llmFn, embedder, db, and driverName are required for Phase 2 T2→T3
+// compression. Pass nil/empty values only in test contexts that do not
+// exercise Phase 2.
+func NewPipeline(
+	store pkg.T2QueryStore,
+	aegis pkg.ContentGateway,
+	llmFn func(string) (string, error),
+	embedder pkg.EmbeddingProvider,
+	db platform.DB,
+	driverName string,
+) *Pipeline {
 	return &Pipeline{
-		store:  store,
-		aegis:  aegis,
-		scorer: NewHeuristicScorer(),
+		store:      store,
+		aegis:      aegis,
+		scorer:     NewHeuristicScorer(),
+		llmFn:      llmFn,
+		embedder:   embedder,
+		db:         db,
+		driverName: driverName,
 	}
 }
 
@@ -96,7 +110,6 @@ func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string) error {
 		}
 
 		if narrative != nil {
-			// Collect source log IDs for the atomic back-link.
 			sourceLogIDs := make([]string, len(logs))
 			for i, log := range logs {
 				sourceLogIDs[i] = log.ID
