@@ -177,6 +177,8 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 			newSystem, newHistory, err := cfg.TransformContext(ctx, systemPrompt, history)
 			if err != nil {
 				slog.Warn("engine: TransformContext error — using untransformed context", "err", err)
+			} else if newSystem == "" {
+				slog.Warn("engine: TransformContext returned empty system prompt — keeping original")
 			} else {
 				systemPrompt = newSystem
 				history = newHistory
@@ -234,11 +236,10 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 
 		// No tool calls → loop complete.
 		if len(toolCalls) == 0 {
-			// Run turn hooks on the final turn.
 			if e.hooks != nil {
 				tr := e.buildTurnResult(iterations, resp)
 				if err := e.hooks.RunAll(ctx, tr); err != nil {
-					slog.Warn("engine: hook error on final turn", "err", err)
+					return nil, fmt.Errorf("engine: critical hook error on final turn: %w", err)
 				}
 			}
 			return &LoopResult{FinalResponse: resp, History: history, Iterations: iterations}, nil
@@ -257,14 +258,14 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 			})
 		}
 
-		// Run turn hooks.
+		// Run turn hooks. Critical hook errors propagate — the session must stop.
 		if e.hooks != nil {
 			tr := e.buildTurnResult(iterations, resp)
 			for _, r := range results {
 				tr.ToolCalls = append(tr.ToolCalls, r.CallID)
 			}
 			if err := e.hooks.RunAll(ctx, tr); err != nil {
-				slog.Warn("engine: hook error", "iteration", iterations, "err", err)
+				return nil, fmt.Errorf("engine: critical hook error (iteration %d): %w", iterations, err)
 			}
 		}
 
@@ -281,23 +282,40 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 		// higher priority (keeper/daemon injections). Follow-up messages
 		// are lower priority (peripheral awareness nudges). Both are
 		// appended as user-role messages before the next LLM call.
+		// Only "user" role messages are accepted — other roles would
+		// break the provider API's turn-taking contract.
+		const maxSteeringDrain = 16
+		steeringDrained := 0
 		if cfg.SteeringChan != nil {
-			for {
+			for steeringDrained < maxSteeringDrain {
 				select {
 				case msg := <-cfg.SteeringChan:
+					if msg.Role != "user" {
+						slog.Warn("engine: steering message rejected (invalid role)", "role", msg.Role)
+						continue
+					}
 					history = append(history, msg)
-					slog.Info("engine: steering message injected", "iteration", iterations)
+					steeringDrained++
+					slog.Info("engine: steering message injected", "iteration", iterations, "count", steeringDrained)
 				default:
 					goto steeringDone
 				}
 			}
+			if steeringDrained >= maxSteeringDrain {
+				slog.Warn("engine: steering drain cap reached", "cap", maxSteeringDrain)
+			}
 		steeringDone:
 		}
-		if cfg.FollowUpChan != nil {
+		// FollowUp is checked only when no steering messages were drained.
+		if steeringDrained == 0 && cfg.FollowUpChan != nil {
 			select {
 			case msg := <-cfg.FollowUpChan:
-				history = append(history, msg)
-				slog.Info("engine: follow-up message injected", "iteration", iterations)
+				if msg.Role != "user" {
+					slog.Warn("engine: follow-up message rejected (invalid role)", "role", msg.Role)
+				} else {
+					history = append(history, msg)
+					slog.Info("engine: follow-up message injected", "iteration", iterations)
+				}
 			default:
 			}
 		}
