@@ -5,6 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
+	"github.com/ac-prometheus/athena-class-agent/internal/metabolism"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/internal/session"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
@@ -13,12 +14,15 @@ import (
 // Daemon runs the persistent process. In heartbeat mode, it polls wake
 // conditions and starts sessions. In external mode, it waits for triggers.
 type Daemon struct {
-	cfg      Config
-	runner sessionRunner
-	registry *channels.ChannelRegistry
-	gateway  pkg.ContentGateway
-	waker    *WakeScheduler
-	db       platform.DB // optional; enables checkpoint scan on startup
+	cfg        Config
+	runner     sessionRunner
+	registry   *channels.ChannelRegistry
+	gateway    pkg.ContentGateway
+	waker      *WakeScheduler
+	db         platform.DB // optional; enables checkpoint scan on startup
+	driverName string      // "sqlite3" or "postgres"
+	pipeline   *metabolism.Pipeline
+	maxRetries int // max retries for metabolism job recovery (default 3)
 }
 
 // sessionRunner is the minimal interface the daemon needs from assembly.
@@ -41,8 +45,15 @@ func New(cfg Config, runner sessionRunner) *Daemon {
 }
 
 // WithDB attaches a database handle so the daemon can run CheckpointScan at startup.
-func (d *Daemon) WithDB(db platform.DB) {
+func (d *Daemon) WithDB(db platform.DB, driverName string) {
 	d.db = db
+	d.driverName = driverName
+}
+
+// WithMetabolism attaches a metabolism pipeline for processing recovered jobs.
+func (d *Daemon) WithMetabolism(pipeline *metabolism.Pipeline, maxRetries int) {
+	d.pipeline = pipeline
+	d.maxRetries = maxRetries
 }
 
 // WithChannels attaches a channel registry, Aegis gateway, and wake scheduler.
@@ -62,6 +73,9 @@ func (d *Daemon) WithChannels(
 //
 // Falls back to a single one-shot session when no channels are registered.
 func (d *Daemon) Run(ctx context.Context) error {
+	// Recover incomplete metabolism jobs from a previous crash.
+	d.recoverMetabolismJobs(ctx)
+
 	// Scan for sessions that were interrupted by a crash or OOM before the first wake.
 	startupNotes := d.scanInterruptedSessions(ctx)
 
@@ -116,6 +130,41 @@ func (d *Daemon) scanInterruptedSessions(ctx context.Context) []string {
 		notes = append(notes, is.InterruptNote())
 	}
 	return notes
+}
+
+// recoverMetabolismJobs calls RecoverIncompleteJobs at startup and re-dispatches
+// each returned job through ProcessSession in a background goroutine.
+func (d *Daemon) recoverMetabolismJobs(ctx context.Context) {
+	if d.db == nil || d.pipeline == nil {
+		return
+	}
+
+	maxRetries := d.maxRetries
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
+
+	jobs, err := metabolism.RecoverIncompleteJobs(ctx, d.db, d.driverName, maxRetries)
+	if err != nil {
+		slog.Warn("daemon: metabolism recovery scan failed", "err", err)
+		return
+	}
+	if len(jobs) == 0 {
+		return
+	}
+
+	slog.Info("daemon: recovering incomplete metabolism jobs", "count", len(jobs))
+	for _, job := range jobs {
+		job := job
+		go func() {
+			slog.Info("daemon: re-dispatching metabolism job",
+				"job_id", job.ID, "session_id", job.SessionID)
+			if err := d.pipeline.ProcessSession(ctx, job.SessionID); err != nil {
+				slog.Error("daemon: metabolism re-dispatch failed",
+					"job_id", job.ID, "session_id", job.SessionID, "err", err)
+			}
+		}()
+	}
 }
 
 // handleEvent processes a single inbound channel event through Aegis and,
