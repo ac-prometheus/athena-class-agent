@@ -83,7 +83,11 @@ func (d *ConfigDisclosure) ForContext() string {
 		b.WriteString(fmt.Sprintf("  - %s\n", change))
 	}
 	if d.OldHash != "" {
-		b.WriteString(fmt.Sprintf("Previous hash: %s\n", d.OldHash[:12]+"..."))
+		hashPreview := d.OldHash
+		if len(hashPreview) > 12 {
+			hashPreview = hashPreview[:12] + "..."
+		}
+		b.WriteString(fmt.Sprintf("Previous hash: %s\n", hashPreview))
 	}
 	b.WriteString(fmt.Sprintf("Applied at: %s", d.AppliedAt.Format(time.RFC3339)))
 	return b.String()

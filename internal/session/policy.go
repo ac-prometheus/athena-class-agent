@@ -113,12 +113,12 @@ func (r *PolicyReader) Read() (*LifecyclePolicy, string, error) {
 // Returns (changed, previousHash, error).
 // If no previous record exists, returns (true, "", nil).
 // If db is nil, returns (false, "", nil) — no comparison possible.
-func (r *PolicyReader) HasChanged(currentHash string) (bool, string, error) {
+func (r *PolicyReader) HasChanged(ctx context.Context, currentHash string) (bool, string, error) {
 	if r.db == nil {
 		return false, "", nil
 	}
 
-	row := r.db.QueryRowContext(context.Background(),
+	row := r.db.QueryRowContext(ctx,
 		`SELECT policy_hash FROM configuration_applied
 		 ORDER BY applied_at DESC LIMIT 1`,
 	)

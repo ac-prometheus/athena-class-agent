@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_plans (
     policy_hash TEXT,
     CHECK (temporal_mode IN ('episodic', 'diurnal', 'continuous')),
     CHECK (wake_cause IN ('initial', 'external', 'scheduled', 'heartbeat', 'agent_requested', 'context_pressure', 'manual', 'recovery')),
+    CHECK (wake_cause_secondary IS NULL OR wake_cause_secondary IN ('initial', 'external', 'scheduled', 'heartbeat', 'agent_requested', 'context_pressure', 'manual', 'recovery')),
     CHECK (activity_profile IN ('normal', 'free', 'sentinel')),
     CHECK (assembly_profile IN ('full', 'light', 'minimal', 'seam')),
     CHECK (bridge_policy IN ('opt_in', 'always', 'never', 'abstain')),
