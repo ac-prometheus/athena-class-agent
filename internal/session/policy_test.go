@@ -22,34 +22,34 @@ func TestLifecyclePolicy_Validate_AllValid(t *testing.T) {
 			name: "all fields set",
 			policy: LifecyclePolicy{
 				TemporalMode:     "episodic",
-				BridgePolicy:     "opt_in",
+				BridgePolicy:     "agent_requested",
 				MetabolismPolicy: "standard",
 				AssemblyProfile:  "full",
 			},
 		},
 		{
-			name: "diurnal/always/deferred/light",
+			name: "diurnal/automatic_with_abstention/deferred/light",
 			policy: LifecyclePolicy{
 				TemporalMode:     "diurnal",
-				BridgePolicy:     "always",
+				BridgePolicy:     "automatic_with_abstention",
 				MetabolismPolicy: "deferred",
 				AssemblyProfile:  "light",
 			},
 		},
 		{
-			name: "continuous/never/skip/minimal",
+			name: "continuous/disabled/skip/minimal",
 			policy: LifecyclePolicy{
 				TemporalMode:     "continuous",
-				BridgePolicy:     "never",
+				BridgePolicy:     "disabled",
 				MetabolismPolicy: "skip",
 				AssemblyProfile:  "minimal",
 			},
 		},
 		{
-			name: "abstain bridge/seam assembly",
+			name: "agent_requested bridge/seam assembly",
 			policy: LifecyclePolicy{
 				TemporalMode:     "episodic",
-				BridgePolicy:     "abstain",
+				BridgePolicy:     "agent_requested",
 				MetabolismPolicy: "standard",
 				AssemblyProfile:  "seam",
 			},
@@ -125,7 +125,7 @@ func TestPolicyReader_Read_ValidFile(t *testing.T) {
 	dir := t.TempDir()
 	policy := LifecyclePolicy{
 		TemporalMode:     "episodic",
-		BridgePolicy:     "opt_in",
+		BridgePolicy:     "agent_requested",
 		MetabolismPolicy: "standard",
 		AssemblyProfile:  "full",
 	}
@@ -205,7 +205,7 @@ func TestPolicyReader_Read_InvalidValues(t *testing.T) {
 
 func TestPolicyReader_SHA256_Deterministic(t *testing.T) {
 	dir := t.TempDir()
-	data := []byte(`{"temporal_mode":"episodic","bridge_policy":"opt_in"}`)
+	data := []byte(`{"temporal_mode":"episodic","bridge_policy":"agent_requested"}`)
 	if err := os.WriteFile(filepath.Join(dir, "lifecycle.json"), data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -262,7 +262,7 @@ func TestValidationMaps_MatchSQL(t *testing.T) {
 	})
 
 	t.Run("bridge_policies", func(t *testing.T) {
-		sqlValues := []string{"opt_in", "always", "never", "abstain"}
+		sqlValues := []string{"automatic_with_abstention", "agent_requested", "disabled"}
 		for _, v := range sqlValues {
 			if !validBridgePolicies[v] {
 				t.Errorf("SQL bridge_policy %q not in validBridgePolicies", v)

@@ -15,6 +15,12 @@ import (
 // and timestamp).
 // ---------------------------------------------------------------------------
 
+// testResolve is a convenience wrapper that generates a fresh planID and
+// timestamp so individual test call sites stay readable.
+func testResolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.OperationalState) *pkg.LifecyclePlan {
+	return Resolve(policy, facts, opState, mustRandHex(16), time.Now())
+}
+
 func defaultPolicy() pkg.LifecyclePolicy {
 	return pkg.LifecyclePolicy{
 		TemporalMode:    pkg.TemporalEpisodic,
@@ -37,7 +43,7 @@ func defaultOpState() pkg.OperationalState {
 }
 
 func TestResolve_DefaultPolicy_MinimalFacts(t *testing.T) {
-	plan := Resolve(defaultPolicy(), minimalFacts(), defaultOpState())
+	plan := testResolve(defaultPolicy(), minimalFacts(), defaultOpState())
 
 	if plan == nil {
 		t.Fatal("Resolve returned nil")
@@ -61,7 +67,7 @@ func TestResolve_DefaultPolicy_MinimalFacts(t *testing.T) {
 
 func TestResolve_PlanIDNotEmpty(t *testing.T) {
 	// C2 fix: plan fields must be fully populated
-	plan := Resolve(defaultPolicy(), minimalFacts(), defaultOpState())
+	plan := testResolve(defaultPolicy(), minimalFacts(), defaultOpState())
 	if plan.ID == "" {
 		t.Error("plan ID is empty — violates C2 (no empty fields)")
 	}
@@ -75,8 +81,8 @@ func TestResolve_PlanIDsAreUnique(t *testing.T) {
 	f := minimalFacts()
 	o := defaultOpState()
 
-	plan1 := Resolve(p, f, o)
-	plan2 := Resolve(p, f, o)
+	plan1 := testResolve(p, f, o)
+	plan2 := testResolve(p, f, o)
 
 	if plan1.ID == plan2.ID {
 		t.Error("two plans from identical inputs must have different IDs")
@@ -96,7 +102,7 @@ func TestResolve_TemporalModeFromPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := defaultPolicy()
 			p.TemporalMode = tt.mode
-			plan := Resolve(p, minimalFacts(), defaultOpState())
+			plan := testResolve(p, minimalFacts(), defaultOpState())
 			if plan.TemporalMode != tt.mode {
 				t.Errorf("TemporalMode = %q, want %q", plan.TemporalMode, tt.mode)
 			}
@@ -117,7 +123,7 @@ func TestResolve_ActivityProfileFromPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := defaultPolicy()
 			p.ActivityProfile = tt.profile
-			plan := Resolve(p, minimalFacts(), defaultOpState())
+			plan := testResolve(p, minimalFacts(), defaultOpState())
 			if plan.ActivityProfile != tt.profile {
 				t.Errorf("ActivityProfile = %q, want %q", plan.ActivityProfile, tt.profile)
 			}
@@ -138,7 +144,7 @@ func TestResolve_BridgePolicyFromPolicy(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			p := defaultPolicy()
 			p.BridgePolicy = tt.policy
-			plan := Resolve(p, minimalFacts(), defaultOpState())
+			plan := testResolve(p, minimalFacts(), defaultOpState())
 			if plan.BridgePolicy != tt.policy {
 				t.Errorf("BridgePolicy = %q, want %q", plan.BridgePolicy, tt.policy)
 			}
@@ -155,7 +161,7 @@ func TestResolveAssemblyProfile_ContextCompaction(t *testing.T) {
 	f := minimalFacts()
 	f.SeamKind = pkg.SeamContextCompaction
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblySeam {
 		t.Errorf("AssemblyProfile = %q, want %q for context compaction seam", plan.AssemblyProfile, pkg.AssemblySeam)
 	}
@@ -166,7 +172,7 @@ func TestResolveAssemblyProfile_InitialWake(t *testing.T) {
 	f := minimalFacts()
 	f.PrimaryCause = pkg.WakeCauseInitial
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyFull {
 		t.Errorf("AssemblyProfile = %q, want %q for initial wake", plan.AssemblyProfile, pkg.AssemblyFull)
 	}
@@ -177,7 +183,7 @@ func TestResolveAssemblyProfile_RecoveryWake(t *testing.T) {
 	f := minimalFacts()
 	f.PrimaryCause = pkg.WakeCauseRecovery
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyFull {
 		t.Errorf("AssemblyProfile = %q, want %q for recovery wake", plan.AssemblyProfile, pkg.AssemblyFull)
 	}
@@ -189,7 +195,7 @@ func TestResolveAssemblyProfile_ContinuousWarmReturn(t *testing.T) {
 	f := minimalFacts()
 	f.SeamKind = pkg.SeamWarmReturn
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyLight {
 		t.Errorf("AssemblyProfile = %q, want %q for continuous+warm_return", plan.AssemblyProfile, pkg.AssemblyLight)
 	}
@@ -200,7 +206,7 @@ func TestResolveAssemblyProfile_ShortGap(t *testing.T) {
 	f := minimalFacts()
 	f.ElapsedDuration = 10 * time.Minute // < 30 min threshold
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyLight {
 		t.Errorf("AssemblyProfile = %q, want %q for short gap (< 30 min)", plan.AssemblyProfile, pkg.AssemblyLight)
 	}
@@ -212,7 +218,7 @@ func TestResolveAssemblyProfile_LongGap_DefaultsFull(t *testing.T) {
 	f := minimalFacts()
 	f.ElapsedDuration = 6 * time.Hour
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyFull {
 		t.Errorf("AssemblyProfile = %q, want %q for long gap with full default", plan.AssemblyProfile, pkg.AssemblyFull)
 	}
@@ -224,7 +230,7 @@ func TestResolveAssemblyProfile_LongGap_DefaultsMinimal(t *testing.T) {
 	f := minimalFacts()
 	f.ElapsedDuration = 6 * time.Hour
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyMinimal {
 		t.Errorf("AssemblyProfile = %q, want %q for long gap with minimal default", plan.AssemblyProfile, pkg.AssemblyMinimal)
 	}
@@ -236,7 +242,7 @@ func TestResolveAssemblyProfile_EmptyDefaultFallsBackToFull(t *testing.T) {
 	f := minimalFacts()
 	f.ElapsedDuration = 6 * time.Hour
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyFull {
 		t.Errorf("AssemblyProfile = %q, want %q when DefaultAssembly is empty", plan.AssemblyProfile, pkg.AssemblyFull)
 	}
@@ -248,13 +254,14 @@ func TestResolveAssemblyProfile_NegativeElapsed(t *testing.T) {
 	f := minimalFacts()
 	f.ElapsedDuration = -5 * time.Minute
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan == nil {
 		t.Fatal("Resolve returned nil for negative elapsed duration")
 	}
-	// Negative duration is < 30 min, so should produce light
-	if plan.AssemblyProfile != pkg.AssemblyLight {
-		t.Errorf("AssemblyProfile = %q, want %q for negative elapsed (treated as short)", plan.AssemblyProfile, pkg.AssemblyLight)
+	// Negative duration (clock skew) should fall through to full, not light.
+	// The > 0 guard prevents clock skew from triggering light assembly.
+	if plan.AssemblyProfile != pkg.AssemblyFull {
+		t.Errorf("AssemblyProfile = %q, want %q for negative elapsed (clock skew → full)", plan.AssemblyProfile, pkg.AssemblyFull)
 	}
 }
 
@@ -267,7 +274,7 @@ func TestResolve_Disclosures_ConfigurationChange(t *testing.T) {
 	f := minimalFacts()
 	f.TransitionContexts = []pkg.TransitionContext{pkg.TransitionConfigurationChange}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 1 {
 		t.Fatalf("expected 1 disclosure, got %d", len(plan.Disclosures))
 	}
@@ -281,7 +288,7 @@ func TestResolve_Disclosures_SubstrateChange(t *testing.T) {
 	f := minimalFacts()
 	f.TransitionContexts = []pkg.TransitionContext{pkg.TransitionSubstrateChange}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 1 {
 		t.Fatalf("expected 1 disclosure, got %d", len(plan.Disclosures))
 	}
@@ -295,7 +302,7 @@ func TestResolve_Disclosures_RecoveryAfterFailure(t *testing.T) {
 	f := minimalFacts()
 	f.TransitionContexts = []pkg.TransitionContext{pkg.TransitionRecoveryAfterFailure}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 1 {
 		t.Fatalf("expected 1 disclosure, got %d", len(plan.Disclosures))
 	}
@@ -309,7 +316,7 @@ func TestResolve_Disclosures_IdentityDocumentChange(t *testing.T) {
 	f := minimalFacts()
 	f.TransitionContexts = []pkg.TransitionContext{pkg.TransitionIdentityDocumentChange}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 1 {
 		t.Fatalf("expected 1 disclosure, got %d", len(plan.Disclosures))
 	}
@@ -323,7 +330,7 @@ func TestResolve_Disclosures_NoneTransition(t *testing.T) {
 	f := minimalFacts()
 	f.TransitionContexts = []pkg.TransitionContext{pkg.TransitionNone}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 0 {
 		t.Errorf("TransitionNone should produce no disclosures, got %d", len(plan.Disclosures))
 	}
@@ -334,7 +341,7 @@ func TestResolve_Disclosures_ModeChange(t *testing.T) {
 	f := minimalFacts()
 	f.TransitionContexts = []pkg.TransitionContext{pkg.TransitionModeChange}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 0 {
 		t.Errorf("TransitionModeChange should produce no disclosures, got %d", len(plan.Disclosures))
 	}
@@ -349,7 +356,7 @@ func TestResolve_Disclosures_Multiple(t *testing.T) {
 		pkg.TransitionRecoveryAfterFailure,
 	}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 3 {
 		t.Fatalf("expected 3 disclosures, got %d", len(plan.Disclosures))
 	}
@@ -363,7 +370,7 @@ func TestResolve_Disclosures_DeduplicatesDuplicateContexts(t *testing.T) {
 		pkg.TransitionConfigurationChange, // duplicate
 	}
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if len(plan.Disclosures) != 1 {
 		t.Errorf("expected 1 disclosure (deduplicated), got %d", len(plan.Disclosures))
 	}
@@ -374,7 +381,7 @@ func TestResolve_Disclosures_EmptyContexts(t *testing.T) {
 	f := minimalFacts()
 	f.TransitionContexts = nil
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.Disclosures != nil {
 		t.Errorf("nil TransitionContexts should produce nil Disclosures, got %v", plan.Disclosures)
 	}
@@ -385,7 +392,7 @@ func TestResolve_Disclosures_EmptyContexts(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestResolve_ReasonsPopulated(t *testing.T) {
-	plan := Resolve(defaultPolicy(), minimalFacts(), defaultOpState())
+	plan := testResolve(defaultPolicy(), minimalFacts(), defaultOpState())
 
 	requiredKeys := []string{"temporal_mode", "activity_profile", "assembly_profile", "bridge_policy"}
 	for _, key := range requiredKeys {
@@ -406,7 +413,7 @@ func TestResolveAssemblyProfile_CompactionSupersedesRecovery(t *testing.T) {
 	f.SeamKind = pkg.SeamContextCompaction
 	f.PrimaryCause = pkg.WakeCauseRecovery
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblySeam {
 		t.Errorf("AssemblyProfile = %q, want %q — compaction supersedes recovery", plan.AssemblyProfile, pkg.AssemblySeam)
 	}
@@ -418,7 +425,7 @@ func TestResolveAssemblyProfile_InitialSupersedesShortGap(t *testing.T) {
 	f.PrimaryCause = pkg.WakeCauseInitial
 	f.ElapsedDuration = 5 * time.Minute
 
-	plan := Resolve(p, f, defaultOpState())
+	plan := testResolve(p, f, defaultOpState())
 	if plan.AssemblyProfile != pkg.AssemblyFull {
 		t.Errorf("AssemblyProfile = %q, want %q — initial supersedes short gap", plan.AssemblyProfile, pkg.AssemblyFull)
 	}

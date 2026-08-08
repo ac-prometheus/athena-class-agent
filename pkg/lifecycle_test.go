@@ -200,7 +200,6 @@ func TestLifecyclePlan_Construction(t *testing.T) {
 		MetabolismPolicy:   "standard",
 		SeamKind:           SeamNone,
 		ResolverVersion:    "v1",
-		ResolvedAt:         now,
 		PolicyHash:         "abc123",
 		GapFacts: &GapFacts{
 			WakeAt:          now,
