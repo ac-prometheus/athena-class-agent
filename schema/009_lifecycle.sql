@@ -18,7 +18,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_plans (
     wake_cause_secondary TEXT,
     activity_profile TEXT NOT NULL DEFAULT 'normal',
     assembly_profile TEXT NOT NULL DEFAULT 'full',
-    bridge_policy TEXT NOT NULL DEFAULT 'opt_in',
+    bridge_policy TEXT NOT NULL DEFAULT 'automatic_with_abstention',
     metabolism_policy TEXT NOT NULL DEFAULT 'standard',
     seam_kind TEXT NOT NULL DEFAULT 'none',
     resolver_version TEXT NOT NULL DEFAULT 'v1',
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS lifecycle_plans (
     CHECK (wake_cause_secondary IS NULL OR wake_cause_secondary IN ('initial', 'external', 'scheduled', 'heartbeat', 'agent_requested', 'context_pressure', 'manual', 'recovery')),
     CHECK (activity_profile IN ('normal', 'free', 'sentinel')),
     CHECK (assembly_profile IN ('full', 'light', 'minimal', 'seam')),
-    CHECK (bridge_policy IN ('opt_in', 'always', 'never', 'abstain')),
+    CHECK (bridge_policy IN ('automatic_with_abstention', 'agent_requested', 'disabled')),
     CHECK (metabolism_policy IN ('standard', 'deferred', 'skip')),
     CHECK (seam_kind IN ('cold_wake', 'warm_return', 'context_compaction', 'rest_return', 'none'))
 );

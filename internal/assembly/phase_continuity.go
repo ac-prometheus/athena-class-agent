@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/awareness"
+	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // ContinuityPhase implements Phase for Phase 2 — bridge synthesis + recent T3 + active T4 threads.
@@ -83,7 +84,15 @@ func (p *ContinuityPhase) assembleContinuity(
 			activeThreads = append(activeThreads, r.Content)
 		}
 
-		if cfg.llmFn != nil && recentNarrative != "" {
+		bridgeAllowed := cfg.llmFn != nil && recentNarrative != ""
+		if bridgeAllowed && cfg.Plan != nil {
+			switch cfg.Plan.BridgePolicy {
+			case pkg.BridgeDisabled, pkg.BridgeAgentRequested:
+				bridgeAllowed = false
+				slog.Info("assembly: bridge skipped per lifecycle policy", "policy", cfg.Plan.BridgePolicy)
+			}
+		}
+		if bridgeAllowed {
 			br, err := awareness.SynthesizeBridge(ctx, recentNarrative, activeThreads, cfg.bridge, cfg.llmFn)
 			if err != nil {
 				slog.Warn("phase 2: bridge synthesis failed", "err", err)

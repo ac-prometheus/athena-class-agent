@@ -196,6 +196,13 @@ const (
 	BridgeDisabled           BridgePolicy = "disabled"
 )
 
+// ValidBridgePolicies is the set of valid BridgePolicy values.
+var ValidBridgePolicies = map[BridgePolicy]bool{
+	BridgeAutoWithAbstention: true,
+	BridgeAgentRequested:     true,
+	BridgeDisabled:           true,
+}
+
 // LifecyclePolicy is the normative policy parsed from the git-tracked workspace config.
 type LifecyclePolicy struct {
 	TemporalMode    TemporalMode    `json:"temporal_mode"`

@@ -8,11 +8,16 @@ import (
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
+// resolverVersion identifies this resolver implementation. Bump when resolution
+// logic changes in a way that would alter output for identical inputs.
+const resolverVersion = "v1"
+
 // Resolve produces a LifecyclePlan from policy, wake facts, and operational state.
 //
-// Deterministic given identical policy and facts. ID and CreatedAt are
-// intentionally non-deterministic for independent addressability and audit
-// timestamps. No I/O, no state mutation beyond the returned plan.
+// Purely functional: identical inputs always produce identical output. The caller
+// is responsible for generating planID (e.g. a random hex string) and resolvedAt
+// (e.g. time.Now().UTC()) at the persistence boundary before calling Resolve.
+// This keeps the resolver testable without mocking time or rand.
 //
 // Resolution rules are derived from the lifecycle ontology and Mk.II review:
 //   - TemporalMode and ActivityProfile are normative policy, copied verbatim.
@@ -22,7 +27,9 @@ import (
 //   - Reasons record the rationale for every resolved choice.
 //   - WakeCause, SeamKind, TransitionContexts, and GapFacts are carried through
 //     so the stored plan is self-explanatory without the original WakeFacts.
-func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.OperationalState) *pkg.LifecyclePlan {
+//   - opState is used to detect prior failure/interruption and adjust assembly and disclosures.
+//   - SessionID is left empty — it is set by the persistence layer after session creation.
+func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.OperationalState, planID string, resolvedAt time.Time) *pkg.LifecyclePlan {
 	reasons := make(map[string]string)
 
 	// TemporalMode — normative policy, not an observation.
@@ -47,23 +54,47 @@ func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.Operat
 	// Disclosures — one per TransitionContext that warrants orientation.
 	disclosures := buildDisclosures(facts.TransitionContexts)
 
-	// ID — 16 random bytes encoded as hex. Not derived from inputs so that two
-	// plans produced from identical inputs are still independently addressable.
-	id := mustRandHex(16)
+	// opState — prior session failure or interruption warrants a disclosure and a
+	// guaranteed full assembly so the agent wakes with complete orientation.
+	priorStatus := opState.PriorRuntimeStatus
+	if priorStatus == pkg.RuntimeFailed || priorStatus == pkg.RuntimeInterrupted {
+		disclosures = append(disclosures, "prior session ended abnormally (status: "+string(priorStatus)+")")
+		reasons["prior_runtime_status"] = "prior session " + string(priorStatus) + " — assembly upgraded to full for safe recovery"
+		if assemblyProfile != pkg.AssemblyFull {
+			assemblyProfile = pkg.AssemblyFull
+			reasons["assembly_profile"] = reasons["assembly_profile"] + "; overridden to full: prior session " + string(priorStatus)
+		}
+	} else if priorStatus != "" {
+		reasons["prior_runtime_status"] = "prior session ended cleanly (status: " + string(priorStatus) + "); no assembly adjustment"
+	}
+
+	// WakeCauseSecondary — first contributing cause if present.
+	var wakeCauseSecondary *pkg.WakeCause
+	if len(facts.ContributingCauses) > 0 {
+		c := facts.ContributingCauses[0]
+		wakeCauseSecondary = &c
+	}
 
 	return &pkg.LifecyclePlan{
-		ID:                 id,
+		ID:                 planID,
+		// SessionID is intentionally empty here; the persistence layer sets it after
+		// creating the session row so the plan can reference the session FK.
+		SessionID:          "",
 		TemporalMode:       temporalMode,
 		WakeCause:          facts.PrimaryCause,
+		WakeCauseSecondary: wakeCauseSecondary,
 		ActivityProfile:    activityProfile,
 		AssemblyProfile:    assemblyProfile,
 		BridgePolicy:       bridgePolicy,
+		MetabolismPolicy:   "standard",
 		SeamKind:           facts.SeamKind,
+		ResolverVersion:    resolverVersion,
+		PolicyHash:         policy.CommitHash,
 		TransitionContexts: facts.TransitionContexts,
 		GapFacts:           &facts.GapFacts,
 		Disclosures:        disclosures,
 		Reasons:            reasons,
-		CreatedAt:          time.Now().UTC(),
+		CreatedAt:          resolvedAt,
 	}
 }
 

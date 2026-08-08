@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
+	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // LifecyclePolicy is the git-tracked lifecycle configuration for an agent.
@@ -23,25 +24,33 @@ type LifecyclePolicy struct {
 	AssemblyProfile  string `json:"assembly_profile"`
 }
 
-// validTemporalModes is the set of valid temporal_mode values.
+// validTemporalModes is the set of valid temporal_mode values, derived from pkg.ValidWakeCauses.
 var validTemporalModes = map[string]bool{
 	"episodic": true, "diurnal": true, "continuous": true,
 }
 
-// validBridgePolicies is the set of valid bridge_policy values.
-var validBridgePolicies = map[string]bool{
-	"opt_in": true, "always": true, "never": true, "abstain": true,
-}
+// validBridgePolicies is the set of valid bridge_policy values, derived from pkg.ValidBridgePolicies.
+var validBridgePolicies = func() map[string]bool {
+	m := make(map[string]bool, len(pkg.ValidBridgePolicies))
+	for k := range pkg.ValidBridgePolicies {
+		m[string(k)] = true
+	}
+	return m
+}()
 
 // validMetabolismPolicies is the set of valid metabolism_policy values.
 var validMetabolismPolicies = map[string]bool{
 	"standard": true, "deferred": true, "skip": true,
 }
 
-// validAssemblyProfiles is the set of valid assembly_profile values.
-var validAssemblyProfiles = map[string]bool{
-	"full": true, "light": true, "minimal": true, "seam": true,
-}
+// validAssemblyProfiles is the set of valid assembly_profile values, derived from pkg.ValidAssemblyProfiles.
+var validAssemblyProfiles = func() map[string]bool {
+	m := make(map[string]bool, len(pkg.ValidAssemblyProfiles))
+	for k := range pkg.ValidAssemblyProfiles {
+		m[string(k)] = true
+	}
+	return m
+}()
 
 // Validate checks that all policy fields are valid values.
 func (p *LifecyclePolicy) Validate() error {

@@ -72,6 +72,15 @@ type AssembleConfig struct {
 	// SkipWitnessCheck bypasses the witness letter requirement when true.
 	// Only for automated testing — logged explicitly to operator_actions when set.
 	SkipWitnessCheck bool
+
+	// Plan is the resolved LifecyclePlan from the lifecycle resolver.
+	// When set, assembly uses it to select phases, configure bridge policy,
+	// and populate the manifest with PlanID. When nil, assembly runs the
+	// default full phase set (backward compatible with Phase 1 callers).
+	Plan *pkg.LifecyclePlan
+
+	// SessionID is set by the caller for manifest and plan linkage.
+	SessionID string
 }
 
 // MinimalAssembleConfig returns an AssembleConfig with nil dependencies — suitable for
@@ -169,8 +178,14 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 	assembled.SystemPrompt = strings.Join(sections, "\n")
 
 	// Build AssemblyManifest from tracked phase data and budget accounting.
+	planID := ""
+	if cfg.Plan != nil {
+		planID = cfg.Plan.ID
+	}
 	assembled.Manifest = &pkg.AssemblyManifest{
 		ID:            newAssemblyID(),
+		PlanID:        planID,
+		SessionID:     cfg.SessionID,
 		PhasesRun:     phasesRun,
 		PhasesSkipped: phasesSkipped,
 		SkipReasons:   skipReasons,
