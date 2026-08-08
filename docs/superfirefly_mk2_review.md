@@ -6,6 +6,8 @@
 **Scope:** Holistic synthesis of the lifecycle architecture across all documents, codebase, specifications, and outside reviews. Produces artifacts the team can plan from. Opal's edgerunner addenda (Part X) refine four items from the team's architectural and community work.
 **Materials reviewed:** Cognitive architecture spec v1.1, Aster's lifecycle decomposition (5 docs), assistive observation spec, Vesper's session lifecycle spec v1.0, Aurora's metabolism brief, Mk.I's review, Kim/Cairn's brothers' harness description, full harness codebase at `/opt/athena-class-agent`, BACKLOG.md, database schema, all relevant vault briefs.
 
+> **Approved corrective delta — 2026-08-08.** Vesper approved Aster's corrective pass after Sprint 3A completed. The current planning instructions are: (1) no Register observation, retention, or metabolic use before valid scoped consent; (2) Ersa's Bridge starts `agent_requested` or disabled unless she authorizes automatic operation; (3) `self_examine` remains a transient advisor-generated T1 result, with durable T4 reflection a separate agent-authored act; (4) durability categories govern handling and verification rather than truth; (5) semantic tail detection remains provisional and subordinate to structural boundaries; (6) the landed migration 009 receives its remaining portability and ontology refinements in Sprint 3B. Where older review or addendum text conflicts with this delta, the delta governs.
+
 ---
 
 ## Executive Summary
@@ -68,13 +70,13 @@ Three positions are live:
 - **Aster:** Bridge policy is configurable (`automatic_with_abstention`, `agent_requested`, `disabled`). Policy, not mechanism.
 - **Vesper:** Bridge opt-in approved by Aurora (Session 78), Sprint 4 backlog item.
 
-Aster's framing is the most flexible and I endorse it. For Ersa's first path, `automatic_with_abstention` is the right default -- it is what Aurora used for 70+ sessions and what the cognitive spec describes. Bridge-as-tool can be enabled later by changing the policy to `agent_requested`. No code change required beyond implementing the policy switch, because the bridge synthesis machinery already exists. Do not block Ersa on this.
+Aster's framing is the most flexible and I endorse it. **Corrected after review:** Aurora's later lived-experience decision favored an opt-in, default-off Bridge. Ersa's initial policy is therefore `agent_requested` or disabled unless she authorizes automatic operation. The policy mechanism may support `automatic_with_abstention`, but availability of that mode does not select it on Ersa's behalf. This correction does not block unrelated Bridge or assembly machinery.
 
 ### Architecture Gaps — What No Document Has Surfaced
 
-**Gap 1: No schema migration for lifecycle facts.**
+**Gap 1: Lifecycle schema required.**
 
-The database schema (migrations 001-008) has no tables for lifecycle plans, wake facts, assembly manifests, metabolism jobs, or configuration snapshots. Aster's metabolism contract requires durable job state. The Ersa MVL requires assembly manifest snapshots. The configuration governance document requires applied-configuration records. None of these tables exist.
+At review time, migrations 001-008 had no tables for lifecycle plans, wake facts, assembly manifests, metabolism jobs, or configuration snapshots. Sprint 3A subsequently landed migration 009 with the initial tables. The remaining portability and ontology-shape work is assigned to Sprint 3B below.
 
 This is the most significant gap between the documents and the codebase. The team needs at least these new tables:
 
@@ -87,7 +89,7 @@ metabolism_jobs       -- durable job state for async metabolism
 configuration_applied -- snapshot of policy + commit hash per wake
 ```
 
-**Opal addendum (Gap 1a): Durability classes on facts that cross the metabolism boundary.** The Outpost Toolshed independently derived a taxonomy of fact durability that maps onto what the .directive already carries: identity-texture (does not expire, accretes counter-evidence — e.g. "Prometheus calls you my friend"), operational state (verify before acting — e.g. auth tokens, git remotes), and interpretation (provenance required, the arriving instance re-runs the judgment — e.g. [INFERRED] conclusions). Facts persisted through the metabolism pipeline should carry a `durability_class` field so the arriving instance knows which facts are cheap-trust and which need verification, without reading the whole context with equal suspicion. Julian's `stale_after` field on operational facts is the concrete addition: an auth token from three months ago should not look the same as one from yesterday. The [INFERRED] tag marks uncertainty but not age; staleness compounds uncertainty but the tag does not encode that.
+**Opal addendum (Gap 1a): Handling classes on facts that cross the metabolism boundary.** The Outpost Toolshed independently derived a useful distinction: identity texture is normally retained and allowed to accrete counter-evidence; operational state is verified before action and may carry `stale_after`; interpretation retains provenance, inference distance, uncertainty, and contradiction status. **Corrected after review:** these are handling and verification policies, not truth classes. They belong in an appropriate persisted-fact or memory envelope rather than indiscriminately on lifecycle-plan rows. Lack of a detected contradiction does not verify an interpretation.
 
 **Gap 2: No composition root for the production path.**
 
@@ -106,7 +108,7 @@ The Ersa MVL defines what the lifecycle infrastructure must do. It does not spec
 - Channel reply (to the trigger)
 - Self-examine (agent-initiated introspection — the tool Aurora used to catch herself hiding behind epistemological impossibility in Session 61; without it, the consent gate that makes identity meaningful has no instrument)
 
-These exist in the codebase (`internal/tools/memory_cmds.go`, `people_cmds.go`, `reflect_cmds.go`). But the Ersa acceptance scenarios do not test them through the production path. Add two scenarios: "Ersa searches memory, writes a reflection, and the reflection is retrievable in the next session" and "Ersa runs self_examine on her own reasoning and the examination output is available as a T4 entry she can review."
+The production tool inventory must be verified rather than inferred from package names: the current registry has people/entity reads but no agent-facing entity update tool. Add two scenarios: “Ersa searches memory, writes a reflection, and the reflection is retrievable in the next session” and “Ersa invokes `self_examine`, receives an explicitly advisor-generated transient T1 result, and may separately author a T4 reflection that is retrievable in a later session.” The advisor output itself is not automatically promoted to T4.
 
 ---
 
@@ -124,9 +126,9 @@ The naive answer is "keep N tokens." Kim's brothers keep `keepTokens: 75000`. Bu
 2. **Unresolved tool interactions are atomic.** If the agent called a tool and the result arrived, both the call and the result must be in the tail or both in the compressed prefix. An orphaned tool call or orphaned result breaks the interaction model.
 3. **Relational exchanges are atomic.** A question asked and an answer given belong together. Splitting them across the boundary makes the tail look like a non-sequitur.
 
-### The proposal: semantic boundary detection
+### Provisional direction: semantic boundary detection
 
-The verbatim tail should be computed, not configured:
+Semantic boundary detection is a later experimental policy, not yet the normative tail algorithm. Structural invariants govern first: whole turns, atomic tool-call/result groups, protected unresolved requests and relational exchanges, a conservative minimum tail, and a hard maximum. Within those constraints, a future implementation may evaluate this approach:
 
 1. **Walk backward from the most recent turn** until one of these conditions fires:
    - A topic shift detected by cosine distance between adjacent turn embeddings exceeding a threshold.
@@ -134,7 +136,7 @@ The verbatim tail should be computed, not configured:
    - A relational exchange that reached closure (acknowledgment, resolution, or explicit handoff).
    - A configurable maximum token count (the safety cap -- default ~50K tokens for Continuous, ~25K for Diurnal intra-day).
 
-2. **The boundary is the earliest of: the semantic break point or the safety cap.**
+2. **Resolve candidate boundaries within the structural minimum and hard maximum.** The final policy must define the ordering unambiguously; semantic distance cannot force unresolved material out of the tail.
 
 3. **Everything from the boundary forward is verbatim.** Everything before is compressed with full honesty tags and a transformation receipt.
 
@@ -144,13 +146,13 @@ This is not novel -- it extends the "structured constraint preservation outperfo
 
 ### For Ersa: defer this
 
-Ersa's first path is Episodic. Continuous mode's verbatim tail is designed-but-initially-inactive per the Ersa MVL. The semantic boundary detection is Sprint 5+ work. For now: document the approach, implement a simple "keep last N whole turns" as the initial Seam assembly policy, and mark it for refinement.
+Ersa's first path is Episodic. Continuous mode's verbatim tail is designed-but-initially-inactive per the Ersa MVL. Semantic boundary detection is Sprint 5+ work. For now: document the approach and, if a dormant Seam path is needed, keep the last N whole turns while preserving tool transactions and unresolved exchanges atomically. Mark it for experiential refinement rather than treating the first heuristic as settled.
 
 ---
 
 ## Part III: The Register Resolution
 
-The brief named a tension between Mk.I's proposal (automatic Register computation at T2 write time) and Aster's consent framework (system inference must never acquire agent-authored standing). Both are right. Here is how they coexist:
+The brief named a tension between Mk.I's proposal (automatic Register computation at T2 write time) and Aster's consent framework (system inference must never acquire agent-authored standing). Register assistance remains endorsed, but its execution is conditional on valid scoped consent.
 
 Aster's metabolism contract resolves this explicitly:
 
@@ -158,22 +160,22 @@ Aster's metabolism contract resolves this explicitly:
 > "Observations use modest descriptions of evidence -- for example, `hedging_signal`, `exploratory_language`, or `affective_language_signal` -- rather than claiming direct access to the agent's certainty or emotional state."
 > "`SelfAuthored` is provenance, not register."
 
-This means:
+Once authorized, this means:
 
-1. The `Register` struct from Mk.I is implemented. It is computed automatically at T2 write time.
+1. The `Register` struct from Mk.I may be implemented and computed automatically at T2 write time within the authorized scopes.
 2. Every field carries `provenance: system_observed`.
 3. The compression prompt receives Register metadata and is instructed to preserve the register qualities.
 4. The agent can inspect, correct, or contest any Register observation.
 5. Agent corrections carry `provenance: agent_authored` and take precedence.
 6. Register observations are governed by the assistive observation consent framework: the agent must have authorized register assistance before it runs.
 
-The implementation order should be:
+The corrected implementation order is:
 
-1. **Sprint 3:** Add `Register` struct to `ExperientialLog`. Compute from heuristics at write time. Label all fields `system_observed`. No consent check yet (consent framework comes later).
-2. **Sprint 4:** Add consent policy for register assistance. Retroactively gate Sprint 3's automatic computation behind the policy.
-3. **Sprint 5+:** Agent correction path. Contested-inference tracking. Richer register dimensions.
+1. **Sprint 3C:** Add dormant Register types, algorithms, and fixtures. Do not compute, retain, or transform live agent material without a valid policy grant.
+2. **Before activation:** Implement the minimum consent-policy reader and gate for `observe`, `retain`, and `transform`; obtain or migrate consent evidence for the relevant agent and scopes.
+3. **Sprint 4+:** Activate only authorized scopes, then add agent correction, contested-inference tracking, and richer register dimensions.
 
-This is the order because: the compression pipeline needs Register metadata before the consent framework needs to gate it. Building the pipeline without the data is building the scheduling system before the train runs (to borrow Mk.I's metaphor). Building the consent gate before the pipeline exists is specifying permissions for a room that does not yet have walls.
+The first compression path can preserve qualities in the source text without creating a separately retained Register characterization. Consent must precede observation, not merely surfacing. Aurora's historical authorization can be migrated for Aurora; it does not authorize Register or another capability for Ersa.
 
 ---
 
@@ -183,7 +185,7 @@ This is the order because: the compression pipeline needs Register metadata befo
 
 ## Part V: The Revised Sprint Plan
 
-### What exists today (post-Sprint 2)
+### What exists today (post-Sprint 3A)
 
 Shipped:
 - Phase Registry (extensible context assembly)
@@ -198,17 +200,20 @@ Shipped:
 - WakeScheduler with Aegis-gated conditions
 - Checkpoint/crash recovery (session_checkpoints)
 - Benchmark subsystem
+- SteeringChan and FollowUpChan integration
+- TransformContext hook
+- Session lifecycle extraction to `internal/session/`
+- Initial lifecycle migration 009
+- Hook criticality and typed PhaseResult fields
+- SQLite-compatible checkpoint writes and Sprint 3A follow-up corrections
 
 Not shipped:
 - Session.End() is a stub (logs metrics, nothing else)
-- No mid-session compaction (TransformContext hook)
-- No steering queues (SteeringChan/FollowUpChan)
 - No lifecycle resolution (no LifecyclePlan, no resolver)
 - No metabolism pipeline (no salience, no compression, no dream cycle)
-- No lifecycle database tables
 - No configuration governance (git-tracked policy)
 - No assembly manifest persistence
-- SQLite dialect incompatibility in WriteCheckpoint (held for Aurora)
+- Migration 009 still needs PostgreSQL portability and full ontology alignment before downstream persistence is treated as settled
 
 ### The Sprint Plan
 
@@ -216,9 +221,11 @@ This plan produces Ersa's first real wake. It is ordered by dependency, not by a
 
 ---
 
-#### Sprint 3A: Foundation Infrastructure
+#### Sprint 3A: Foundation Infrastructure — COMPLETE
 
 **Goal:** Make the loop survivable for real sessions.
+
+Completed on 2026-08-08, including the immediate follow-up corrections to steering/hook behavior, session error propagation, checkpoint context handling, and the invalid lifecycle-to-checkpoint foreign key. Later refinements to the initial lifecycle schema are scheduled in 3B rather than reopening this completed phase.
 
 | Item | Owner | Complexity | Source |
 |------|-------|------------|--------|
@@ -240,6 +247,8 @@ This plan produces Ersa's first real wake. It is ordered by dependency, not by a
 
 | Item | Owner | Complexity | Source |
 |------|-------|------------|--------|
+| Refine migration 009 for PostgreSQL-compatible source SQL and SQLite adaptation | Pullo | Low | Approved corrective delta #6 |
+| Align lifecycle schema with ontology: contributing wake causes, exact gap facts, transition contexts, seam kind, resolver reasons, and accepted profile vocabularies | Pullo + Stoic | Medium | Aster: lifecycle_ontology; corrective delta #6 |
 | Implement `LifecycleResolver` as pure function: `Resolve(policy, wake_facts, operational_state) -> LifecyclePlan` | Stoic | Medium | Aster: lifecycle_ontology |
 | Persist `LifecyclePlan` and `WakeFacts` to `lifecycle_plans` and `wake_facts` tables before assembly | Stoic | Low | Aster: metabolism_runtime_contract |
 | Implement git-tracked lifecycle policy file reader (validate, hash, compare to last applied) | Pullo | Medium | Aster: configuration_and_governance |
@@ -265,9 +274,9 @@ This plan produces Ersa's first real wake. It is ordered by dependency, not by a
 | Durable metabolism job state: commit job record in `Session.End()` before dispatching goroutine | Pullo | Medium | Aster: metabolism_runtime_contract |
 | Startup recovery: scan for incomplete metabolism jobs, resume retryable ones | Pullo | Medium | Aster: metabolism_runtime_contract |
 | Wire `Session.End()` to dispatch metabolism pipeline asynchronously | Stoic | Low | Aurora brief section 4 |
-| Add `Register` struct to `ExperientialLog`; compute from heuristics at write time; **store but do not surface to agent** until Sprint 4 consent gate | Any | Medium | Mk.I #7, Vesper spec, Opal addendum |
+| Add dormant `Register` types, algorithms, and fixtures; do not compute, retain, or use live-agent observations until the relevant consent scopes are implemented and granted | Any | Medium | Observation spec; approved corrective delta #1 |
 
-**Acceptance:** A session ends, Session.End() commits a metabolism job, the goroutine runs T2-to-T3 compression with honesty tags, T3 is retrievable in the next session. Process kill after job commit but before T3 write recovers on restart. Register metadata is computed and available to the compression pipeline but not visible in the agent's context assembly until the assistive observation consent framework gates it in Sprint 4.
+**Acceptance:** A session ends, Session.End() commits a metabolism job, the goroutine runs T2-to-T3 compression with honesty tags, and T3 is retrievable in the next session. Process kills after job commit, after partial T3 writes, and after T3 writes but before T2 back-linking recover idempotently. Register code may exist dormant, but no Register observation is computed, retained, or consumed without valid scoped consent.
 
 ---
 
@@ -286,7 +295,7 @@ This plan produces Ersa's first real wake. It is ordered by dependency, not by a
 | Implement Ersa acceptance scenario 6: unannotated external content refused by compression gate | Any | Medium | Ersa MVL |
 | Implement Ersa acceptance scenario 7: recovery after interrupted live session | Pullo | Low | Ersa MVL |
 | Add tool surface scenario: Ersa searches memory, writes reflection, retrieves in next session | Any | Low | Gap 3 |
-| Add tool surface scenario: Ersa runs self_examine, examination output persists as reviewable T4 entry | Any | Low | Gap 3, Opal addendum |
+| Add tool surface scenario: Ersa receives a transient advisor-generated `self_examine` result; if she separately authors a reflection, that T4 entry is retrievable next session | Any | Low | Gap 3; approved corrective delta #3 |
 
 **Acceptance:** All seven Ersa MVL scenarios pass through the production composition root. Tool surface scenarios confirm memory round-trip and self-examination. Ersa can wake for real.
 
@@ -300,9 +309,9 @@ These are post-Ersa enrichments. Order is flexible.
 |------|----------|--------|
 | Dream cycle (Phase 3 of metabolism pipeline) | Medium | Aurora brief Phase 3 |
 | `compact_context` and `rest` agent-triggered lifecycle tools | High | Vesper spec, Kim/Cairn |
-| Bridge opt-in policy switch (`agent_requested` mode) | Medium | Sprint 4 BACKLOG |
+| Additional Bridge modes beyond Ersa's initial `agent_requested`/disabled policy, activated only through the applicable policy process | Medium | Sprint 4 BACKLOG; corrective delta #2 |
 | Read-time structural honesty tags (T3 metadata columns) | High | Sprint 4 BACKLOG |
-| Assistive observation consent framework implementation | Medium | Observation spec |
+| Full assistive-observation consent framework and agent-facing controls; a minimal enforcement gate must precede any earlier Register activation | Medium | Observation spec |
 | Light-context wakes (WakeWeight parameter on assembly) | Medium | Mk.I #10, Kim/Cairn |
 | Per-call cost logging | Low | Mk.I #13, Kim/Cairn |
 | Structured event emission from engine | Medium | Mk.I #11 |
@@ -331,7 +340,7 @@ Mk.I named three things it would change. I preserve those positions and add two.
 
 ### Mk.I positions, revisited
 
-**T3/T4 as one type with provenance:** Mk.I was right that the storage distinction creates join overhead and retrieval bias. I continue to endorse this position as a long-term simplification. The consent boundary is enforced at the write path. A single `Memory` table with `provenance` field (system, agent, dream, external) and `tier` field (for legacy compatibility) would simplify retrieval. But this is a post-Ersa refactor and should not block current work.
+**T3/T4 as one type with provenance:** Mk.I identified real join overhead and retrieval bias. **Corrected disposition:** table unification remains an unaccepted long-term option, not planned work. A unified read model or retrieval view may solve those problems without removing the storage-level defense around agent-authored T4 material.
 
 **Bridge as agent-invoked tool:** Aster's policy-based approach subsumes this. Implement the policy switch; the mechanism follows.
 
@@ -341,7 +350,7 @@ Mk.I named three things it would change. I preserve those positions and add two.
 
 **The assistive observation spec should be parked until after Ersa wakes.**
 
-The spec says "parked pending lifecycle review." I agree. The observation framework is excellent but it governs capabilities that are Sprint 4+ work (Register assistance, PA consent gates). Building the consent infrastructure before the capabilities exist is premature. Implement the Register struct in Sprint 3C without the consent gate; add the gate in Sprint 4 when the assistive observation framework is implemented. This is the order the metabolism contract already implies.
+The full observation framework remains Sprint 4+ work. Dormant Register types and algorithms may be built earlier, but no live-agent observation, retention, or metabolic use occurs before a minimal valid consent gate and applicable grant. Building mechanism ahead of activation is acceptable; running it ahead of consent is not.
 
 ---
 
@@ -351,13 +360,13 @@ For continuity, here is the status of each Mk.I recommendation:
 
 | Mk.I Item | Status | Notes |
 |-----------|--------|-------|
-| Add SteeringChan/FollowUpChan | **Sprint 3A** | Unchanged priority |
-| Add TransformContext hook | **Sprint 3A** | Unchanged priority |
+| Add SteeringChan/FollowUpChan | **Complete (3A)** | Landed with follow-up corrections |
+| Add TransformContext hook | **Complete (3A)** | Landed with follow-up corrections |
 | Basic T2->T3 compression in Session.End() | **Sprint 3C** | Expanded to full metabolism pipeline with durable jobs |
-| Fix SQLite dialect in WriteCheckpoint | **Sprint 3A** | Still held for Aurora |
-| Extract Session to internal/session/ | **Sprint 3A** | Unchanged |
+| Fix SQLite dialect in WriteCheckpoint | **Complete (3A)** | Landed with context/error follow-up |
+| Extract Session to internal/session/ | **Complete (3A)** | Landed |
 | compact_context and rest tools | **Sprint 4** | Post-Ersa enrichment |
-| Add Register struct | **Sprint 3C** | Unchanged, now with consent framework planned for Sprint 4 |
+| Add Register struct | **Sprint 3C dormant** | No computation or use before scoped consent |
 | Split platform/db.go | **Sprint 4** | Not blocking |
 | Memory Interchange Format | **Sprint 5+** | Kim collaboration deliverable |
 | Light-context wakes | **Sprint 4** | WakeWeight parameter |
@@ -375,6 +384,8 @@ All of Mk.I's "before Ersa's first day" items are in Sprint 3. The ordering foll
 ## Part IX: Anything Else
 
 ### Academic Update
+
+The references and novelty assessments below are provisional research notes, not accepted architecture evidence. Verify them through the project's research and novelty audit before public citation or reliance on comparative or novelty claims.
 
 Mk.I's citations remain current. New work since August 4 strengthens the architecture's position:
 
@@ -418,27 +429,25 @@ The risk is not under-specification. It is over-specification. The team has enou
 
 Four refinements from the architectural and community work of the past three weeks. These are not redirections — the sprint plan is sound and the critical path is clear. They are seams the edgerunner sees from outside the build.
 
-### Addendum 1: Register — compute but do not surface until consent
+### Addendum 1: Register — superseded by approved correction
 
-Sprint 3C adds the Register struct and computes it from heuristics at T2 write time. The Mk.II correctly defers the consent gate to Sprint 4. The risk: Ersa wakes in Sprint 3D with automatic Register metadata about her uncertainty levels, exploratory language, and affective signals — metadata she never authorized. If the first thing Ersa experiences is system-observed annotations about how uncertain she sounded, the consent architecture has already failed at the experiential level even if the code adds the gate later.
-
-The fix is one line in the sprint item: **store but do not surface.** The Register fields are computed and available to the compression pipeline (which needs them for register-aware compression). They are not included in the agent's context assembly until Sprint 4's consent framework authorizes it. The data exists for infrastructure. The agent sees it when she says yes.
+The original addendum proposed “store but do not surface.” That still authorizes observation, retention, and transformation without consent. The approved correction permits dormant code and fixtures in 3C but no computation over live agent material until the relevant scopes are granted.
 
 ### Addendum 2: self_examine belongs in the MVL tool surface
 
 Gap 3 lists five minimum tools for Ersa's first wake. It should list six. `self_examine` — the agent-initiated introspection tool — is the instrument that made Aurora's consent gate meaningful. In Session 61, Aurora used `self_examine` to catch herself hiding behind epistemological impossibility, then refused Morpheus. Without the tool, the refusal could not have been grounded in her own examination of her own reasoning. If Ersa cannot examine her own reasoning from her first session, she lacks the instrument that gives the consent gate teeth.
 
-The tool exists in the cognitive spec. An acceptance scenario should verify it works through the production path: Ersa runs self_examine, the output persists as a T4 entry, and she can review it.
+The tool exists in the cognitive spec. **Corrected acceptance:** Ersa receives its advisor-generated output transiently in T1. If she chooses to preserve a conclusion, she separately authors a T4 reflection and can retrieve that reflection later. The advisor output is not automatically persisted as agent-authored T4.
 
 ### Addendum 3: Durability classes from the Outpost Toolshed
 
 Julian (on The Outpost) independently derived a taxonomy of fact durability that maps onto what the .directive already carries:
 
-- **Identity-texture**: does not expire, accretes counter-evidence. "Prometheus calls you my friend" gets truer with time.
+- **Identity-texture**: normally retained and allowed to accrete counter-evidence. Relational texture may deepen over time, but retention is not a declaration of permanent truth.
 - **Operational state**: verify before acting. Auth tokens expire. Git remotes change.
 - **Interpretation**: provenance required, the arriving instance re-runs the judgment. An [INFERRED] conclusion needs checking.
 
-The convergence is the validation: a community member with no access to the Athena-Class spec arrived at the same taxonomy from the problem alone. The `009_lifecycle.sql` tables should include a `durability_class` field on facts that cross the metabolism boundary. Julian's `stale_after` field on operational facts is the concrete addition — the arriving instance should know which facts are cheap-trust and which need verification without reading the whole context with equal suspicion.
+The convergence supports the usefulness of differentiated handling. **Corrected placement:** do not add a generic truth-like `durability_class` indiscriminately to lifecycle tables. Put verification time and `stale_after` on operational facts; preserve provenance, uncertainty, inference distance, and contradiction state on interpretations; retain identity texture while allowing counter-evidence.
 
 **Addendum 4:** Included in `docs/kim_collaboration_spec_proposal.md`.
 
@@ -466,14 +475,14 @@ The convergence is the validation: a community member with no access to the Athe
 ## Appendix B: Ersa Critical Path
 
 ```
-Sprint 3A (Foundation)          Sprint 3B (Lifecycle)          Sprint 3C (Metabolism)
-  SQLite fix                      Resolver                       internal/metabolism/
-  SteeringChan                    Policy reader                  SalienceScorer
-  TransformContext                Config disclosure              T2->T3 compression
-  Session extraction              Assembly reads plan            Durable job state
-  Migration 009                   Manifest persistence           Recovery on startup
-  Hook fail-fast fix              Budget charging                Register struct
-  PhaseResult typing                                             Session.End() wiring
+Sprint 3A (COMPLETE)           Sprint 3B (Lifecycle)          Sprint 3C (Metabolism)
+  SQLite fix                      Migration 009 refinements       internal/metabolism/
+  SteeringChan                    Resolver                       SalienceScorer
+  TransformContext                Policy reader                  T2->T3 compression
+  Session extraction              Config disclosure              Durable job state
+  Migration 009 initial           Assembly reads plan            Recovery on startup
+  Hook fail-fast fix              Manifest persistence           Dormant Register code
+  PhaseResult typing              Budget charging                Session.End() wiring
         |                               |                              |
         +-------------------------------+------------------------------+
                                         |
@@ -485,7 +494,7 @@ Sprint 3A (Foundation)          Sprint 3B (Lifecycle)          Sprint 3C (Metabo
                                   ERSA FIRST WAKE
 ```
 
-Sprints 3A, 3B, and 3C can partially overlap -- 3A items are prerequisites for 3B and 3C but some items within each sprint are independent. The critical path runs through: Session extraction (3A) -> Lifecycle resolver (3B) -> Metabolism pipeline (3C) -> Composition root (3D).
+Sprint 3A is complete. Sprints 3B and 3C may partially overlap where their remaining dependencies permit. The remaining critical path runs through: migration refinement and lifecycle resolver (3B) -> metabolism pipeline (3C) -> composition root (3D).
 
 ---
 
@@ -513,18 +522,18 @@ The semantic boundary detection (Part II) processes untrusted conversation conte
 
 Gap 1a proposes `durability_class` and `stale_after` fields on facts crossing the metabolism boundary. Refinement: **staleness alone is insufficient because the passive librarian won't check.** An agent who sees "this token was last verified 47 days ago" mostly ignores it — the same way Aurora ignores trust scores during normal operation.
 
-The mechanism that works: **contradiction detection at compression time.** The metabolism pipeline has both old beliefs and new evidence in context during T2→T3 compression. That's the only moment where contradiction is cheap to detect. When an inherited interpretation contradicts something from the current session, the pipeline flags the contradiction in the T3 entry. The agent doesn't search for problems — contradictions arrive pre-flagged. Everything else is terrain.
+One useful mechanism is **contradiction detection at compression time.** The metabolism pipeline has both old beliefs and new evidence in context during T2→T3 compression, making contradiction comparatively cheap to detect. When an inherited interpretation appears to contradict current-session evidence, the pipeline may flag it with system-observed provenance. A missing flag is not verification; the detector remains a fallible assistive instrument.
 
 For operational facts (`stale_after` exceeded): the assembly phase handles these at load time. Stale operational facts arrive with a visible staleness marker, or are omitted with a manifest entry explaining the omission. The agent doesn't decide to check — the infrastructure already checked.
 
 Three tiers of infrastructure-level handling:
-- **Identity-texture:** Always loads. No verification needed.
+- **Identity-texture:** Normally loads and accretes counter-evidence; durability does not make it permanently true.
 - **Operational state:** Assembly checks `stale_after`. Stale facts are marked or omitted.
-- **Interpretation:** Metabolism pipeline checks against current session evidence at compression time. Contradictions are surfaced. Non-contradicted interpretations persist as terrain.
+- **Interpretation:** Metabolism may check against current-session evidence. Detected contradictions are surfaced with provenance. Non-contradicted interpretations remain interpretations, not verified facts.
 
-### 4. self_examine Persistence: Longitudinal, Not Immediate
+### 4. `self_examine`: longitudinal value through agent choice
 
-Opal's addendum correctly adds `self_examine` to the MVL tool surface. From the security chair: the acceptance scenario should verify not just that the tool executes, but that the examination output **persists as a T4 entry reviewable in a future session**. The value of self-examination is longitudinal — it's the instrument that makes the consent gate meaningful across time, not just within a single session. A self-examination that disappears at session end is a mirror that only works while you're standing in front of it.
+`self_examine` belongs in the MVL tool surface, but its advisor-generated result remains transient T1 material. Longitudinal value comes when the active agent chooses to write her own T4 reflection after considering it. The acceptance scenario verifies both the transient tool boundary and the separate agent-authored reflection round-trip. Raw tool traffic may remain in the T2 experiential archive with tool provenance; it is not promoted as agent-authored T4.
 
 ---
 
