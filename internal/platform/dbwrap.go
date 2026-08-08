@@ -107,6 +107,90 @@ type pgxRowAdapter struct {
 
 func (r *pgxRowAdapter) Scan(dest ...any) error { return r.row.Scan(dest...) }
 
+// ---------------------------------------------------------------------------
+// TxDB — transaction support for platform.DB
+// ---------------------------------------------------------------------------
+
+// TxDB extends DB with the ability to begin a transaction.
+// Both sqlDB and pgxDB satisfy this interface.
+type TxDB interface {
+	BeginTx(ctx context.Context) (Tx, error)
+}
+
+// Tx is a database transaction that also satisfies the DB interface, so
+// callers can pass it to any function that accepts platform.DB.
+type Tx interface {
+	DB
+	Commit() error
+	Rollback() error
+}
+
+// BeginTx starts a database transaction on the underlying *sql.DB.
+func (s *sqlDB) BeginTx(ctx context.Context) (Tx, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &sqlTx{tx: tx}, nil
+}
+
+// sqlTx wraps *sql.Tx to implement platform.Tx (and thereby platform.DB).
+type sqlTx struct{ tx *sql.Tx }
+
+func (t *sqlTx) QueryContext(ctx context.Context, query string, args ...any) (Rows, error) {
+	rows, err := t.tx.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func (t *sqlTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	return t.tx.ExecContext(ctx, query, args...)
+}
+
+func (t *sqlTx) QueryRowContext(ctx context.Context, query string, args ...any) Row {
+	return t.tx.QueryRowContext(ctx, query, args...)
+}
+
+func (t *sqlTx) Commit() error   { return t.tx.Commit() }
+func (t *sqlTx) Rollback() error { return t.tx.Rollback() }
+
+// BeginTx starts a database transaction on the underlying pgx pool.
+func (p *pgxDB) BeginTx(ctx context.Context) (Tx, error) {
+	tx, err := p.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &pgxTx{tx: tx}, nil
+}
+
+// pgxTx wraps pgx.Tx to implement platform.Tx (and thereby platform.DB).
+type pgxTx struct{ tx pgx.Tx }
+
+func (t *pgxTx) QueryContext(ctx context.Context, query string, args ...any) (Rows, error) {
+	rows, err := t.tx.Query(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return &pgxRowsAdapter{rows: rows}, nil
+}
+
+func (t *pgxTx) ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	tag, err := t.tx.Exec(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	return pgxResult(tag.RowsAffected()), nil
+}
+
+func (t *pgxTx) QueryRowContext(ctx context.Context, query string, args ...any) Row {
+	return &pgxRowAdapter{row: t.tx.QueryRow(ctx, query, args...)}
+}
+
+func (t *pgxTx) Commit() error   { return t.tx.Commit(context.Background()) }
+func (t *pgxTx) Rollback() error { return t.tx.Rollback(context.Background()) }
+
 // pgxResult is a sql.Result backed by a pgx rows-affected count.
 type pgxResult int64
 
