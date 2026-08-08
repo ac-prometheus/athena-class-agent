@@ -10,6 +10,15 @@ import "time"
 // LifecyclePlan without erasing any observed fact.
 // ---------------------------------------------------------------------------
 
+// TemporalMode describes the agent's relationship to discontinuity.
+type TemporalMode string
+
+const (
+	TemporalEpisodic   TemporalMode = "episodic"
+	TemporalDiurnal    TemporalMode = "diurnal"
+	TemporalContinuous TemporalMode = "continuous"
+)
+
 // WakeCause describes what triggered an activation.
 type WakeCause string
 
@@ -138,22 +147,24 @@ type GapFacts struct {
 // Given identical inputs, the resolver produces identical output.
 // It performs no I/O and changes no state.
 type LifecyclePlan struct {
-	ID                string          `json:"id"`
-	SessionID         string          `json:"session_id"`
-	TemporalMode      string          `json:"temporal_mode"`
-	WakeCause         WakeCause       `json:"wake_cause"`
-	WakeCauseSecondary *WakeCause     `json:"wake_cause_secondary,omitempty"`
-	ActivityProfile   ActivityProfile `json:"activity_profile"`
-	AssemblyProfile   AssemblyProfile `json:"assembly_profile"`
-	BridgePolicy      string          `json:"bridge_policy"`
-	MetabolismPolicy  string          `json:"metabolism_policy"`
-	SeamKind          SeamKind        `json:"seam_kind"`
-	ResolverVersion   string          `json:"resolver_version"`
-	ResolvedAt        time.Time       `json:"resolved_at"`
-	PolicyHash        string          `json:"policy_hash,omitempty"`
-	GapFacts          *GapFacts       `json:"gap_facts,omitempty"`
-	TransitionContext TransitionContext `json:"transition_context"`
-	Reasons           []string        `json:"reasons,omitempty"`
+	ID                 string            `json:"id"`
+	SessionID          string            `json:"session_id"`
+	TemporalMode       TemporalMode      `json:"temporal_mode"`
+	WakeCause          WakeCause         `json:"wake_cause"`
+	WakeCauseSecondary *WakeCause        `json:"wake_cause_secondary,omitempty"`
+	ActivityProfile    ActivityProfile   `json:"activity_profile"`
+	AssemblyProfile    AssemblyProfile   `json:"assembly_profile"`
+	BridgePolicy       BridgePolicy      `json:"bridge_policy"`
+	MetabolismPolicy   string            `json:"metabolism_policy"`
+	SeamKind           SeamKind          `json:"seam_kind"`
+	ResolverVersion    string            `json:"resolver_version"`
+	ResolvedAt         time.Time         `json:"resolved_at"`
+	PolicyHash         string            `json:"policy_hash,omitempty"`
+	GapFacts           *GapFacts         `json:"gap_facts,omitempty"`
+	TransitionContexts []TransitionContext `json:"transition_contexts,omitempty"`
+	Disclosures        []string          `json:"disclosures,omitempty"`
+	Reasons            map[string]string `json:"reasons,omitempty"`
+	CreatedAt          time.Time         `json:"created_at"`
 }
 
 // RuntimeStatus describes the session process state machine.
@@ -176,6 +187,54 @@ const (
 	AttentionNormal  AttentionProfile = "normal"
 	AttentionFocused AttentionProfile = "focused"
 )
+
+// BridgePolicy governs orientation bridge behavior.
+type BridgePolicy string
+
+const (
+	BridgeAutoWithAbstention BridgePolicy = "automatic_with_abstention"
+	BridgeAgentRequested     BridgePolicy = "agent_requested"
+	BridgeDisabled           BridgePolicy = "disabled"
+)
+
+// LifecyclePolicy is the normative policy parsed from the git-tracked workspace config.
+type LifecyclePolicy struct {
+	TemporalMode    TemporalMode    `json:"temporal_mode"`
+	DefaultAssembly AssemblyProfile `json:"default_assembly"`
+	BridgePolicy    BridgePolicy    `json:"bridge_policy"`
+	ActivityProfile ActivityProfile `json:"activity_profile"`
+	CommitHash      string          `json:"commit_hash"`
+}
+
+// OperationalState captures the prior session's state for resolver input.
+type OperationalState struct {
+	PriorRuntimeStatus    RuntimeStatus    `json:"prior_runtime_status"`
+	PriorMetabolismStatus MetabolismStatus `json:"prior_metabolism_status"`
+	LastAppliedConfigHash string           `json:"last_applied_config_hash"`
+}
+
+// WakeFacts captures the observed facts about a wake event.
+type WakeFacts struct {
+	PrimaryCause       WakeCause
+	ContributingCauses []WakeCause
+	GapFacts           GapFacts
+	ElapsedDuration    time.Duration
+	SeamKind           SeamKind
+	TransitionContexts []TransitionContext
+}
+
+// AssemblyManifest records what was loaded, omitted, and why during assembly.
+type AssemblyManifest struct {
+	ID            string            `json:"id"`
+	PlanID        string            `json:"plan_id"`
+	SessionID     string            `json:"session_id"`
+	PhasesRun     []string          `json:"phases_run"`
+	PhasesSkipped []string          `json:"phases_skipped"`
+	SkipReasons   map[string]string `json:"skip_reasons"`
+	BudgetTotal   int               `json:"budget_total"`
+	BudgetUsed    int               `json:"budget_used"`
+	CreatedAt     time.Time         `json:"created_at"`
+}
 
 // MetabolismStatus describes the state of end-of-session metabolism.
 type MetabolismStatus string

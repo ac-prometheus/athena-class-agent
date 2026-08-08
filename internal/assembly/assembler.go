@@ -2,10 +2,12 @@ package assembly
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/awareness"
 	"github.com/ac-prometheus/athena-class-agent/internal/identity"
@@ -29,6 +31,7 @@ type AssembledContext struct {
 	IntegrityReport *identity.IntegrityReport
 	BridgeAbstained bool
 	DepthManifest   *DepthManifest
+	Manifest        *pkg.AssemblyManifest // what was loaded, omitted, and why
 }
 
 // DepthManifest records how much of each tier was available vs. loaded.
@@ -97,7 +100,8 @@ func NewContextAssembler(identityDir string, budget int) *ContextAssembler {
 func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*AssembledContext, error) {
 	manifest := &DepthManifest{}
 	var sections []string
-	remaining := a.budget * 4 // chars available (4 chars ≈ 1 token)
+	budgetChars := a.budget * 4 // chars available (4 chars ≈ 1 token)
+	remaining := budgetChars
 
 	// Defensive sort: DefaultPhases is already ordered, but custom registries may not be.
 	phases := make(PhaseRegistry, len(a.phases))
@@ -108,6 +112,11 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 
 	assembled := &AssembledContext{DepthManifest: manifest}
 
+	// Phase tracking for AssemblyManifest.
+	var phasesRun []string
+	var phasesSkipped []string
+	skipReasons := make(map[string]string)
+
 	for _, phase := range phases {
 		if phase.MinBudget() > 0 && remaining < phase.MinBudget() {
 			slog.Info("assembly: phase skipped (budget pressure)",
@@ -115,8 +124,11 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 				"remaining", remaining,
 				"minBudget", phase.MinBudget(),
 			)
+			reason := fmt.Sprintf("budget pressure (%d chars remaining, %d required)", remaining, phase.MinBudget())
 			manifest.AccessHints = append(manifest.AccessHints,
 				fmt.Sprintf("%s omitted — budget pressure", phase.Name()))
+			phasesSkipped = append(phasesSkipped, phase.Name())
+			skipReasons[phase.Name()] = reason
 			continue
 		}
 
@@ -127,8 +139,12 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 			}
 			slog.Warn("assembly: phase partial failure — continuing",
 				"phase", phase.Name(), "err", err)
+			phasesSkipped = append(phasesSkipped, phase.Name())
+			skipReasons[phase.Name()] = fmt.Sprintf("error: %v", err)
 			continue
 		}
+
+		phasesRun = append(phasesRun, phase.Name())
 
 		if result.Content != "" {
 			sections = append(sections, result.Content)
@@ -152,7 +168,31 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 	sections = append(sections, buildManifestBlock(manifest))
 	assembled.SystemPrompt = strings.Join(sections, "\n")
 
+	// Build AssemblyManifest from tracked phase data and budget accounting.
+	assembled.Manifest = &pkg.AssemblyManifest{
+		ID:            newAssemblyID(),
+		PhasesRun:     phasesRun,
+		PhasesSkipped: phasesSkipped,
+		SkipReasons:   skipReasons,
+		BudgetTotal:   budgetChars,
+		BudgetUsed:    budgetChars - remaining,
+		CreatedAt:     time.Now(),
+	}
+
 	return assembled, nil
+}
+
+// newAssemblyID generates a random UUID v4 string for AssemblyManifest.ID.
+func newAssemblyID() string {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand failure is extremely rare; fall back to a zero UUID rather than panic.
+		return "00000000-0000-4000-8000-000000000000"
+	}
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
+		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
 // buildManifestBlock renders the DepthManifest as a structured text block.

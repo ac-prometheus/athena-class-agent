@@ -21,13 +21,14 @@ func (p *IncomingPhase) MinBudget() int   { return 0 }     // mandatory — neve
 func (p *IncomingPhase) IsFatal() bool    { return false }
 
 // Assemble builds the Phase 5 incoming block: unread message count and any inband notes
-// (e.g. interrupt notices from CheckpointScan). CharsUsed is always 0 — incoming is
-// never charged against the dynamic budget.
+// (e.g. interrupt notices from CheckpointScan). CharsUsed reflects actual content length
+// so budget tracking is accurate.
 func (p *IncomingPhase) Assemble(_ context.Context, cfg *AssembleConfig, manifest *DepthManifest, _ int) (PhaseResult, error) {
 	var b strings.Builder
 	b.WriteString(fmt.Sprintf("=== INCOMING ===\nUnread messages: %d\n", manifest.UnreadMessages))
 	for _, note := range cfg.InbandNotes {
 		b.WriteString(note + "\n")
 	}
-	return PhaseResult{Content: b.String(), CharsUsed: 0}, nil
+	content := b.String()
+	return PhaseResult{Content: content, CharsUsed: len(content)}, nil
 }
