@@ -61,6 +61,11 @@ type ExperientialLog struct {
 	Content       string
 	ContentSource string // "self", "operator", "tool-result", "browser-content", "search-result", "forum-content"
 	CreatedAt     time.Time
+	// Register holds system-observed metadata about the log entry's register
+	// qualities (certainty, temperature, exploratory language, self-authored).
+	// DORMANT: computed but not stored or surfaced until consent scopes are
+	// implemented and the agent grants authorization (Sprint 4+).
+	Register *RegisterObservation `json:"register,omitempty"`
 }
 
 // NarrativeSummary is a T3 compressed summary of experiential logs.
