@@ -139,10 +139,10 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 
 		// Extract structured outputs from PhaseResult.
 		if result.IdentityDocs != nil {
-			assembled.IdentityDocs = result.IdentityDocs.(*identity.IdentityDocs)
+			assembled.IdentityDocs = result.IdentityDocs
 		}
 		if result.IntegrityReport != nil {
-			assembled.IntegrityReport = result.IntegrityReport.(*identity.IntegrityReport)
+			assembled.IntegrityReport = result.IntegrityReport
 		}
 		if result.BridgeAbstained {
 			assembled.BridgeAbstained = true

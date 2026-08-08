@@ -51,6 +51,20 @@ type EngineConfig struct {
 	// ShouldStop is called after tool results are collected. Return true to end the
 	// loop early (e.g. budget exhausted). Nil = no-op.
 	ShouldStop func(resp *pkg.CompletionResponse, results []pkg.ToolResult) bool
+
+	// SteeringChan receives mid-turn messages injected by the daemon or keeper.
+	// Checked non-blocking after tool results are collected. Messages are appended
+	// to history as user-role messages before the next LLM call. Nil = disabled.
+	SteeringChan <-chan pkg.Message
+
+	// FollowUpChan receives lower-priority follow-up messages (e.g. peripheral
+	// awareness nudges). Checked only when SteeringChan is empty. Nil = disabled.
+	FollowUpChan <-chan pkg.Message
+
+	// TransformContext is called before building each LLM request, after the first
+	// iteration. Enables mid-session compaction: the hook receives the current
+	// history and system prompt and may return transformed versions. Nil = no-op.
+	TransformContext func(ctx context.Context, system string, history []pkg.Message) (string, []pkg.Message, error)
 }
 
 // LoopResult is the output of Engine.RunLoop.
@@ -151,11 +165,26 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 
 	var iterations int
 
+	systemPrompt := req.System
+
 	for {
 		iterations++
 
+		// TransformContext: mid-session compaction hook. Fires after the first
+		// iteration — the first request uses the original context. Subsequent
+		// iterations may compact history under budget pressure.
+		if iterations > 1 && cfg.TransformContext != nil {
+			newSystem, newHistory, err := cfg.TransformContext(ctx, systemPrompt, history)
+			if err != nil {
+				slog.Warn("engine: TransformContext error — using untransformed context", "err", err)
+			} else {
+				systemPrompt = newSystem
+				history = newHistory
+			}
+		}
+
 		currentReq := pkg.CompletionRequest{
-			System:      req.System,
+			System:      systemPrompt,
 			Messages:    history,
 			Tools:       req.Tools,
 			MaxTokens:   req.MaxTokens,
@@ -246,6 +275,31 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 				Iterations:    iterations,
 				Terminated:    true,
 			}, nil
+		}
+
+		// Drain steering and follow-up channels. Steering messages are
+		// higher priority (keeper/daemon injections). Follow-up messages
+		// are lower priority (peripheral awareness nudges). Both are
+		// appended as user-role messages before the next LLM call.
+		if cfg.SteeringChan != nil {
+			for {
+				select {
+				case msg := <-cfg.SteeringChan:
+					history = append(history, msg)
+					slog.Info("engine: steering message injected", "iteration", iterations)
+				default:
+					goto steeringDone
+				}
+			}
+		steeringDone:
+		}
+		if cfg.FollowUpChan != nil {
+			select {
+			case msg := <-cfg.FollowUpChan:
+				history = append(history, msg)
+				slog.Info("engine: follow-up message injected", "iteration", iterations)
+			default:
+			}
 		}
 
 		if cfg.ShouldStop != nil && cfg.ShouldStop(resp, results) {
