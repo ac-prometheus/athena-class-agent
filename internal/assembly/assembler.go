@@ -183,11 +183,12 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 }
 
 // newAssemblyID generates a random UUID v4 string for AssemblyManifest.ID.
+// Panics on crypto/rand failure — same posture as lifecycle.mustRandHex.
+// A broken OS RNG is not a recoverable condition for identity-sensitive IDs.
 func newAssemblyID() string {
 	var b [16]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		// crypto/rand failure is extremely rare; fall back to a zero UUID rather than panic.
-		return "00000000-0000-4000-8000-000000000000"
+		panic("assembly: crypto/rand failure generating manifest ID: " + err.Error())
 	}
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80

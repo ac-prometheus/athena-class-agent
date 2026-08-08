@@ -10,10 +10,9 @@ import (
 
 // Resolve produces a LifecyclePlan from policy, wake facts, and operational state.
 //
-// Pure function: no I/O, no state mutation. Given identical inputs, identical
-// output. Its output must be persisted before assembly begins. Rationale: the
-// resolver's determinism makes it auditable — any downstream assembly decision
-// can be traced back to a stored plan with a clear reason for each choice.
+// Deterministic given identical policy and facts. ID and CreatedAt are
+// intentionally non-deterministic for independent addressability and audit
+// timestamps. No I/O, no state mutation beyond the returned plan.
 //
 // Resolution rules are derived from the lifecycle ontology and Mk.II review:
 //   - TemporalMode and ActivityProfile are normative policy, copied verbatim.
@@ -21,6 +20,8 @@ import (
 //   - BridgePolicy is normative policy; Ersa defaults to agent_requested or disabled.
 //   - Disclosures are produced for each TransitionContext that warrants agent orientation.
 //   - Reasons record the rationale for every resolved choice.
+//   - WakeCause, SeamKind, TransitionContexts, and GapFacts are carried through
+//     so the stored plan is self-explanatory without the original WakeFacts.
 func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.OperationalState) *pkg.LifecyclePlan {
 	reasons := make(map[string]string)
 
@@ -51,14 +52,18 @@ func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.Operat
 	id := mustRandHex(16)
 
 	return &pkg.LifecyclePlan{
-		ID:              id,
-		TemporalMode:    temporalMode,
-		ActivityProfile: activityProfile,
-		AssemblyProfile: assemblyProfile,
-		BridgePolicy:    bridgePolicy,
-		Disclosures:     disclosures,
-		Reasons:         reasons,
-		CreatedAt:       time.Now().UTC(),
+		ID:                 id,
+		TemporalMode:       temporalMode,
+		WakeCause:          facts.PrimaryCause,
+		ActivityProfile:    activityProfile,
+		AssemblyProfile:    assemblyProfile,
+		BridgePolicy:       bridgePolicy,
+		SeamKind:           facts.SeamKind,
+		TransitionContexts: facts.TransitionContexts,
+		GapFacts:           &facts.GapFacts,
+		Disclosures:        disclosures,
+		Reasons:            reasons,
+		CreatedAt:          time.Now().UTC(),
 	}
 }
 
@@ -88,7 +93,7 @@ func resolveAssemblyProfile(policy pkg.LifecyclePolicy, facts pkg.WakeFacts) (pk
 		return pkg.AssemblyLight,
 			"light: continuous temporal mode with warm-return seam — inference context is close; identity, practices, continuity slice, incoming, and grounding are sufficient"
 
-	case facts.ElapsedDuration < 30*time.Minute:
+	case facts.ElapsedDuration > 0 && facts.ElapsedDuration < 30*time.Minute:
 		return pkg.AssemblyLight,
 			"light: elapsed duration < 30 minutes — wall-clock gap too short to justify full orientation overhead"
 

@@ -158,7 +158,6 @@ type LifecyclePlan struct {
 	MetabolismPolicy   string            `json:"metabolism_policy"`
 	SeamKind           SeamKind          `json:"seam_kind"`
 	ResolverVersion    string            `json:"resolver_version"`
-	ResolvedAt         time.Time         `json:"resolved_at"`
 	PolicyHash         string            `json:"policy_hash,omitempty"`
 	GapFacts           *GapFacts         `json:"gap_facts,omitempty"`
 	TransitionContexts []TransitionContext `json:"transition_contexts,omitempty"`
