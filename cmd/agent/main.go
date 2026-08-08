@@ -134,11 +134,13 @@ func (r *phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 		return fmt.Errorf("post-turn hooks: %w", hookErr)
 	}
 
-	if err := sess.WriteCheckpoint(); err != nil {
+	if err := sess.WriteCheckpoint(ctx); err != nil {
 		return fmt.Errorf("writing checkpoint: %w", err)
 	}
 
-	sess.End()
+	if err := sess.End(); err != nil {
+		return fmt.Errorf("session end: %w", err)
+	}
 	return nil
 }
 

@@ -13,7 +13,10 @@ CREATE TABLE IF NOT EXISTS lifecycle_plans (
     resolver_version TEXT NOT NULL DEFAULT 'v1',
     resolved_at TIMESTAMP NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     policy_hash TEXT,
-    FOREIGN KEY (session_id) REFERENCES session_checkpoints(session_id)
+    CHECK (temporal_mode IN ('episodic', 'diurnal', 'continuous')),
+    CHECK (assembly_profile IN ('full', 'minimal', 'delta')),
+    CHECK (bridge_policy IN ('opt_in', 'always', 'never', 'abstain')),
+    CHECK (metabolism_policy IN ('standard', 'deferred', 'skip'))
 );
 
 CREATE TABLE IF NOT EXISTS wake_facts (

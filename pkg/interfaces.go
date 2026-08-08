@@ -11,7 +11,7 @@ type SessionLifecycle interface {
 	Start(agentName, wakeReason string) error
 	End() error
 	RecordTurn(promptToks, completionToks int)
-	WriteCheckpoint() error
+	WriteCheckpoint(ctx context.Context) error
 	GetID() string
 	GetState() SessionState
 	TurnCount() int

@@ -94,7 +94,7 @@ func (s *Session) RecordTurn(promptToks, completionToks int) {
 // WriteCheckpoint upserts one row in session_checkpoints with the current turn state.
 // Called after each turn so a crash leaves an auditable record.
 // Silently skips if no DB is available.
-func (s *Session) WriteCheckpoint() error {
+func (s *Session) WriteCheckpoint(ctx context.Context) error {
 	if s.db == nil {
 		return nil
 	}
@@ -109,7 +109,7 @@ ON CONFLICT (id) DO UPDATE
       state         = 'active',
       created_at    = NOW()`
 
-	_, err := s.db.ExecContext(context.Background(), q,
+	_, err := s.db.ExecContext(ctx, q,
 		s.ID, s.ID, s.turnCount, "", s.TokensUsed,
 	)
 	if err != nil {
