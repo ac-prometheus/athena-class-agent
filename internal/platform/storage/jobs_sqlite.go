@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
@@ -106,7 +107,10 @@ func (s *SQLiteJobStore) LastStatus(ctx context.Context) (string, error) {
 		`SELECT status FROM metabolism_jobs ORDER BY created_at DESC LIMIT 1`)
 	var status string
 	if err := row.Scan(&status); err != nil {
-		return "", nil
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("storage: querying last job status: %w", err)
 	}
 	return status, nil
 }

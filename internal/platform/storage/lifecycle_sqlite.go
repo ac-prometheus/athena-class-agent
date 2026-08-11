@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -154,7 +155,10 @@ func (s *SQLiteLifecycleStore) LastPolicyHash(ctx context.Context, _ string) (st
 		`SELECT policy_hash FROM configuration_applied ORDER BY applied_at DESC LIMIT 1`)
 	var hash string
 	if err := row.Scan(&hash); err != nil {
-		return "", nil
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("storage: querying last policy hash: %w", err)
 	}
 	return hash, nil
 }
@@ -199,7 +203,10 @@ func (s *SQLiteLifecycleStore) LastCheckpointState(ctx context.Context) (string,
 		`SELECT state FROM session_checkpoints ORDER BY created_at DESC LIMIT 1`)
 	var state string
 	if err := row.Scan(&state); err != nil {
-		return "", nil
+		if err == sql.ErrNoRows {
+			return "", nil
+		}
+		return "", fmt.Errorf("storage: querying last checkpoint state: %w", err)
 	}
 	return state, nil
 }
@@ -209,7 +216,10 @@ func (s *SQLiteLifecycleStore) LastWakeAt(ctx context.Context) (time.Time, error
 		`SELECT wake_at FROM wake_facts ORDER BY wake_at DESC LIMIT 1`)
 	var wakeAt time.Time
 	if err := row.Scan(&wakeAt); err != nil {
-		return time.Time{}, nil
+		if err == sql.ErrNoRows {
+			return time.Time{}, nil
+		}
+		return time.Time{}, fmt.Errorf("storage: querying last wake time: %w", err)
 	}
 	return wakeAt, nil
 }

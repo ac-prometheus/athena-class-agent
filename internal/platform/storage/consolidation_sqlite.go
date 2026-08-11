@@ -38,13 +38,16 @@ func (s *SQLiteConsolidationStore) CommitNarrative(ctx context.Context, narrativ
 	}
 	defer tx.Rollback() //nolint:errcheck
 
+	if narrative.ID == "" {
+		narrative.ID = newID()
+	}
 	beliefJSON := beliefMetaJSON(narrative.Belief)
-	embeddingJSON := embeddingJSON(narrative.Embedding)
+	embVec := embeddingJSON(narrative.Embedding)
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO narrative_summaries
-			(id, session_id, content, belief_meta, embedding, created_at)
+			(id, session_id, content, embedding, belief_meta, created_at)
 		 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
-		narrative.ID, narrative.SessionID, narrative.Content, beliefJSON, embeddingJSON,
+		narrative.ID, narrative.SessionID, narrative.Content, embVec, beliefJSON,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: inserting T3 narrative %s: %w", narrative.ID, err)
