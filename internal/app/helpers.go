@@ -9,34 +9,8 @@ import (
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
-	"github.com/ac-prometheus/athena-class-agent/internal/session"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
-
-// localPolicyToPkg converts the session-layer LifecyclePolicy (file-parsed) to
-// the pkg.LifecyclePolicy that the lifecycle resolver expects.
-func localPolicyToPkg(p *session.LifecyclePolicy, hash string) pkg.LifecyclePolicy {
-	out := pkg.LifecyclePolicy{
-		TemporalMode:    pkg.TemporalEpisodic,
-		DefaultAssembly: pkg.AssemblyFull,
-		BridgePolicy:    pkg.BridgeAgentRequested,
-		ActivityProfile: pkg.ActivityNormal,
-		CommitHash:      hash,
-	}
-	if p == nil {
-		return out
-	}
-	if p.TemporalMode != "" {
-		out.TemporalMode = pkg.TemporalMode(p.TemporalMode)
-	}
-	if p.AssemblyProfile != "" {
-		out.DefaultAssembly = pkg.AssemblyProfile(p.AssemblyProfile)
-	}
-	if p.BridgePolicy != "" {
-		out.BridgePolicy = pkg.BridgePolicy(p.BridgePolicy)
-	}
-	return out
-}
 
 // wakeReasonToCause maps the daemon's freeform wake reason string to a
 // canonical pkg.WakeCause.

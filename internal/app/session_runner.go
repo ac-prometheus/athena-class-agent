@@ -44,29 +44,33 @@ func (r *SessionRunner) RunSession(wakeReason string, inbandNotes []string) erro
 
 	// 1. Read policy from workspace file. Missing file is not an error — use defaults.
 	policyReader := session.NewPolicyReader(r.deps.Config.WorkspaceDir, r.deps.DB)
-	localPolicy, policyHash, err := policyReader.Read()
+	policy, policyHash, err := policyReader.Read()
 	if err != nil {
 		r.logger.Warn("lifecycle: policy read error — loading last valid snapshot", "err", err)
-		// Fall back to the last resolved plan's policy instead of inventing defaults.
-		localPolicy = queryLastPolicy(ctx, r.deps.DB)
-		policyHash = ""
-		if localPolicy != nil {
+		lastPolicy := queryLastPolicy(ctx, r.deps.DB)
+		if lastPolicy != nil {
+			policy = *lastPolicy
 			r.logger.Info("lifecycle: fell back to last valid policy from lifecycle_plans")
+		} else {
+			policy = pkg.LifecyclePolicy{
+				TemporalMode:    pkg.TemporalEpisodic,
+				DefaultAssembly: pkg.AssemblyFull,
+				BridgePolicy:    pkg.BridgeAgentRequested,
+				ActivityProfile: pkg.ActivityNormal,
+			}
 		}
+		policyHash = ""
 	}
-	pkgPolicy := localPolicyToPkg(localPolicy, policyHash)
 
 	// 2. Check for policy change and produce a disclosure note if changed.
 	var disclosureNote string
-	if localPolicy != nil {
+	if policyHash != "" {
 		changed, prevHash, changeErr := policyReader.HasChanged(ctx, policyHash)
 		if changeErr != nil {
 			r.logger.Warn("lifecycle: policy change check failed", "err", changeErr)
 		} else if changed {
-			// Load the previous policy for field-level comparison instead of
-			// treating every change as an initial application (nil old).
 			oldPolicy := queryLastPolicy(ctx, r.deps.DB)
-			disclosure := session.GenerateDisclosure(oldPolicy, localPolicy)
+			disclosure := session.GenerateDisclosure(oldPolicy, &policy)
 			disclosure.PolicyPath = policyReader.PolicyPath()
 			disclosure.OldHash = prevHash
 			disclosure.NewHash = policyHash
@@ -119,7 +123,7 @@ func (r *SessionRunner) RunSession(wakeReason string, inbandNotes []string) erro
 	opState := queryOperationalState(ctx, r.deps)
 
 	// 5. Resolve lifecycle plan — purely functional, no I/O.
-	plan := lifecycle.Resolve(pkgPolicy, facts, opState, mustRandHex(16), wakeAt.UTC())
+	plan := lifecycle.Resolve(policy, facts, opState, mustRandHex(16), wakeAt.UTC())
 
 	// 6. Create session.
 	sess := session.NewSession(r.deps.Config.AgentName, string(plan.WakeCause), r.deps.DB)

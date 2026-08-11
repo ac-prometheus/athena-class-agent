@@ -19,6 +19,13 @@ const (
 	TemporalContinuous TemporalMode = "continuous"
 )
 
+// ValidTemporalModes is the set of valid TemporalMode values.
+var ValidTemporalModes = map[TemporalMode]bool{
+	TemporalEpisodic:   true,
+	TemporalDiurnal:    true,
+	TemporalContinuous: true,
+}
+
 // WakeCause describes what triggered an activation.
 type WakeCause string
 
@@ -204,12 +211,19 @@ var ValidBridgePolicies = map[BridgePolicy]bool{
 }
 
 // LifecyclePolicy is the normative policy parsed from the git-tracked workspace config.
+// This is the single canonical type — no parallel string-based representation exists.
 type LifecyclePolicy struct {
-	TemporalMode    TemporalMode    `json:"temporal_mode"`
-	DefaultAssembly AssemblyProfile `json:"default_assembly"`
-	BridgePolicy    BridgePolicy    `json:"bridge_policy"`
-	ActivityProfile ActivityProfile `json:"activity_profile"`
-	CommitHash      string          `json:"commit_hash"`
+	TemporalMode     TemporalMode    `json:"temporal_mode"`
+	DefaultAssembly  AssemblyProfile `json:"default_assembly"`
+	BridgePolicy     BridgePolicy    `json:"bridge_policy"`
+	ActivityProfile  ActivityProfile `json:"activity_profile"`
+	MetabolismPolicy string          `json:"metabolism_policy"`
+	CommitHash       string          `json:"commit_hash"`
+}
+
+// ValidMetabolismPolicies is the set of valid MetabolismPolicy values.
+var ValidMetabolismPolicies = map[string]bool{
+	"standard": true, "deferred": true, "skip": true,
 }
 
 // OperationalState captures the prior session's state for resolver input.
