@@ -21,7 +21,7 @@ func Bootstrap(cfg *platform.Config, profile RuntimeProfile) (*Dependencies, err
 	deps := &Dependencies{Config: cfg}
 
 	// Database
-	driverName := driverNameFromDSN(cfg.DatabaseDSN)
+	driverName := DriverNameFromDSN(cfg.DatabaseDSN)
 	if cfg.DatabaseDSN != "" {
 		store, err := platform.NewStore(cfg.DatabaseDSN)
 		if err != nil {
@@ -72,8 +72,8 @@ func Bootstrap(cfg *platform.Config, profile RuntimeProfile) (*Dependencies, err
 	return deps, nil
 }
 
-// driverNameFromDSN infers the database driver from the DSN string.
-func driverNameFromDSN(dsn string) string {
+// DriverNameFromDSN infers the database driver from the DSN string.
+func DriverNameFromDSN(dsn string) string {
 	if dsn == "" {
 		return "sqlite3"
 	}
