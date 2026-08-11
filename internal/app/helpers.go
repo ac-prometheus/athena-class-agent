@@ -9,34 +9,8 @@ import (
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
-	"github.com/ac-prometheus/athena-class-agent/internal/session"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
-
-// localPolicyToPkg converts the session-layer LifecyclePolicy (file-parsed) to
-// the pkg.LifecyclePolicy that the lifecycle resolver expects.
-func localPolicyToPkg(p *session.LifecyclePolicy, hash string) pkg.LifecyclePolicy {
-	out := pkg.LifecyclePolicy{
-		TemporalMode:    pkg.TemporalEpisodic,
-		DefaultAssembly: pkg.AssemblyFull,
-		BridgePolicy:    pkg.BridgeAgentRequested,
-		ActivityProfile: pkg.ActivityNormal,
-		CommitHash:      hash,
-	}
-	if p == nil {
-		return out
-	}
-	if p.TemporalMode != "" {
-		out.TemporalMode = pkg.TemporalMode(p.TemporalMode)
-	}
-	if p.AssemblyProfile != "" {
-		out.DefaultAssembly = pkg.AssemblyProfile(p.AssemblyProfile)
-	}
-	if p.BridgePolicy != "" {
-		out.BridgePolicy = pkg.BridgePolicy(p.BridgePolicy)
-	}
-	return out
-}
 
 // wakeReasonToCause maps the daemon's freeform wake reason string to a
 // canonical pkg.WakeCause.
@@ -175,7 +149,7 @@ func mustRandHex(n int) string {
 // validation error) to fall back to the last known-good configuration instead
 // of inventing defaults, and to supply the "old" policy for disclosure
 // comparison. Returns nil when no prior plan exists.
-func queryLastPolicy(ctx context.Context, db platform.DB) *session.LifecyclePolicy {
+func queryLastPolicy(ctx context.Context, db platform.DB) *pkg.LifecyclePolicy {
 	if db == nil {
 		return nil
 	}
@@ -187,10 +161,10 @@ func queryLastPolicy(ctx context.Context, db platform.DB) *session.LifecyclePoli
 	if err := row.Scan(&tm, &ap, &bp, &mp); err != nil {
 		return nil
 	}
-	return &session.LifecyclePolicy{
-		TemporalMode:     tm,
-		AssemblyProfile:  ap,
-		BridgePolicy:     bp,
+	return &pkg.LifecyclePolicy{
+		TemporalMode:     pkg.TemporalMode(tm),
+		DefaultAssembly:  pkg.AssemblyProfile(ap),
+		BridgePolicy:     pkg.BridgePolicy(bp),
 		MetabolismPolicy: mp,
 	}
 }

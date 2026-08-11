@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
+	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // ConfigDisclosure records a configuration change and provides a human-readable
@@ -21,13 +22,12 @@ type ConfigDisclosure struct {
 
 // GenerateDisclosure compares two lifecycle policies and produces a disclosure
 // listing what changed. If old is nil, all fields in new are reported as initial values.
-func GenerateDisclosure(old, new *LifecyclePolicy) *ConfigDisclosure {
+func GenerateDisclosure(old, new *pkg.LifecyclePolicy) *ConfigDisclosure {
 	d := &ConfigDisclosure{
 		AppliedAt: time.Now().UTC(),
 	}
 
 	if old == nil {
-		// First application — report all non-empty fields as initial configuration.
 		if new.TemporalMode != "" {
 			d.Changes = append(d.Changes, fmt.Sprintf("temporal_mode set to %q", new.TemporalMode))
 		}
@@ -37,8 +37,8 @@ func GenerateDisclosure(old, new *LifecyclePolicy) *ConfigDisclosure {
 		if new.MetabolismPolicy != "" {
 			d.Changes = append(d.Changes, fmt.Sprintf("metabolism_policy set to %q", new.MetabolismPolicy))
 		}
-		if new.AssemblyProfile != "" {
-			d.Changes = append(d.Changes, fmt.Sprintf("assembly_profile set to %q", new.AssemblyProfile))
+		if new.DefaultAssembly != "" {
+			d.Changes = append(d.Changes, fmt.Sprintf("assembly_profile set to %q", new.DefaultAssembly))
 		}
 		if len(d.Changes) == 0 {
 			d.Changes = append(d.Changes, "initial policy applied (all defaults)")
@@ -46,7 +46,6 @@ func GenerateDisclosure(old, new *LifecyclePolicy) *ConfigDisclosure {
 		return d
 	}
 
-	// Compare each field.
 	if old.TemporalMode != new.TemporalMode {
 		d.Changes = append(d.Changes,
 			fmt.Sprintf("temporal_mode changed from %q to %q", old.TemporalMode, new.TemporalMode))
@@ -59,9 +58,9 @@ func GenerateDisclosure(old, new *LifecyclePolicy) *ConfigDisclosure {
 		d.Changes = append(d.Changes,
 			fmt.Sprintf("metabolism_policy changed from %q to %q", old.MetabolismPolicy, new.MetabolismPolicy))
 	}
-	if old.AssemblyProfile != new.AssemblyProfile {
+	if old.DefaultAssembly != new.DefaultAssembly {
 		d.Changes = append(d.Changes,
-			fmt.Sprintf("assembly_profile changed from %q to %q", old.AssemblyProfile, new.AssemblyProfile))
+			fmt.Sprintf("assembly_profile changed from %q to %q", old.DefaultAssembly, new.DefaultAssembly))
 	}
 
 	if len(d.Changes) == 0 {
@@ -72,7 +71,6 @@ func GenerateDisclosure(old, new *LifecyclePolicy) *ConfigDisclosure {
 }
 
 // ForContext formats the disclosure for injection into context assembly.
-// The output is a concise, multi-line block suitable for the orientation phase.
 func (d *ConfigDisclosure) ForContext() string {
 	var b strings.Builder
 	b.WriteString("[configuration change]\n")
@@ -114,7 +112,6 @@ func RecordDisclosure(ctx context.Context, db platform.DB, sessionID string, d *
 	return nil
 }
 
-// nilIfEmpty returns nil for empty strings, otherwise a pointer-compatible value.
 func nilIfEmpty(s string) interface{} {
 	if s == "" {
 		return nil

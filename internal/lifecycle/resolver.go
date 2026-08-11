@@ -32,12 +32,18 @@ const resolverVersion = "v1"
 func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.OperationalState, planID string, resolvedAt time.Time) *pkg.LifecyclePlan {
 	reasons := make(map[string]string)
 
-	// TemporalMode — normative policy, not an observation.
+	// TemporalMode — normative policy, not an observation. Default to episodic.
 	temporalMode := policy.TemporalMode
+	if temporalMode == "" {
+		temporalMode = pkg.TemporalEpisodic
+	}
 	reasons["temporal_mode"] = "copied from normative policy (workspace config)"
 
-	// ActivityProfile — normative policy, not an observation.
+	// ActivityProfile — normative policy, not an observation. Default to normal.
 	activityProfile := policy.ActivityProfile
+	if activityProfile == "" {
+		activityProfile = pkg.ActivityNormal
+	}
 	reasons["activity_profile"] = "copied from normative policy (workspace config)"
 
 	// AssemblyProfile — resolved from observed wake facts.
@@ -49,6 +55,9 @@ func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.Operat
 	// BridgePolicy — normative policy. Corrective delta (2026-08-08) specifies
 	// Ersa starts agent_requested or disabled unless she authorizes automatic operation.
 	bridgePolicy := policy.BridgePolicy
+	if bridgePolicy == "" {
+		bridgePolicy = pkg.BridgeAgentRequested
+	}
 	reasons["bridge_policy"] = "copied from normative policy; Ersa's initial posture is agent_requested or disabled per corrective delta 2026-08-08"
 
 	// Disclosures — one per TransitionContext that warrants orientation.

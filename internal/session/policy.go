@@ -1,6 +1,7 @@
 package session
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"database/sql"
@@ -14,59 +15,60 @@ import (
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
-// LifecyclePolicy is the git-tracked lifecycle configuration for an agent.
-// Stored as JSON (or YAML when gopkg.in/yaml.v3 is available) at a configurable
-// workspace path (e.g. workspace/lifecycle.json).
-type LifecyclePolicy struct {
+// policyDocument is the JSON file representation. Fields are strings that get
+// validated and converted to typed enums in pkg.LifecyclePolicy.
+type policyDocument struct {
 	TemporalMode     string `json:"temporal_mode"`
 	BridgePolicy     string `json:"bridge_policy"`
 	MetabolismPolicy string `json:"metabolism_policy"`
 	AssemblyProfile  string `json:"assembly_profile"`
 }
 
-// validTemporalModes is the set of valid temporal_mode values, derived from pkg.ValidWakeCauses.
-var validTemporalModes = map[string]bool{
-	"episodic": true, "diurnal": true, "continuous": true,
-}
-
-// validBridgePolicies is the set of valid bridge_policy values, derived from pkg.ValidBridgePolicies.
-var validBridgePolicies = func() map[string]bool {
-	m := make(map[string]bool, len(pkg.ValidBridgePolicies))
-	for k := range pkg.ValidBridgePolicies {
-		m[string(k)] = true
+func (d *policyDocument) validate() error {
+	if d.TemporalMode != "" {
+		if _, ok := pkg.ValidTemporalModes[pkg.TemporalMode(d.TemporalMode)]; !ok {
+			return fmt.Errorf("policy: invalid temporal_mode %q", d.TemporalMode)
+		}
 	}
-	return m
-}()
-
-// validMetabolismPolicies is the set of valid metabolism_policy values.
-var validMetabolismPolicies = map[string]bool{
-	"standard": true, "deferred": true, "skip": true,
-}
-
-// validAssemblyProfiles is the set of valid assembly_profile values, derived from pkg.ValidAssemblyProfiles.
-var validAssemblyProfiles = func() map[string]bool {
-	m := make(map[string]bool, len(pkg.ValidAssemblyProfiles))
-	for k := range pkg.ValidAssemblyProfiles {
-		m[string(k)] = true
+	if d.BridgePolicy != "" {
+		if !pkg.ValidBridgePolicies[pkg.BridgePolicy(d.BridgePolicy)] {
+			return fmt.Errorf("policy: invalid bridge_policy %q", d.BridgePolicy)
+		}
 	}
-	return m
-}()
-
-// Validate checks that all policy fields are valid values.
-func (p *LifecyclePolicy) Validate() error {
-	if p.TemporalMode != "" && !validTemporalModes[p.TemporalMode] {
-		return fmt.Errorf("policy: invalid temporal_mode %q", p.TemporalMode)
+	if d.MetabolismPolicy != "" {
+		if !pkg.ValidMetabolismPolicies[d.MetabolismPolicy] {
+			return fmt.Errorf("policy: invalid metabolism_policy %q", d.MetabolismPolicy)
+		}
 	}
-	if p.BridgePolicy != "" && !validBridgePolicies[p.BridgePolicy] {
-		return fmt.Errorf("policy: invalid bridge_policy %q", p.BridgePolicy)
-	}
-	if p.MetabolismPolicy != "" && !validMetabolismPolicies[p.MetabolismPolicy] {
-		return fmt.Errorf("policy: invalid metabolism_policy %q", p.MetabolismPolicy)
-	}
-	if p.AssemblyProfile != "" && !validAssemblyProfiles[p.AssemblyProfile] {
-		return fmt.Errorf("policy: invalid assembly_profile %q", p.AssemblyProfile)
+	if d.AssemblyProfile != "" {
+		if !pkg.ValidAssemblyProfiles[pkg.AssemblyProfile(d.AssemblyProfile)] {
+			return fmt.Errorf("policy: invalid assembly_profile %q", d.AssemblyProfile)
+		}
 	}
 	return nil
+}
+
+func (d *policyDocument) toCanonical(hash string) pkg.LifecyclePolicy {
+	p := pkg.LifecyclePolicy{
+		TemporalMode:    pkg.TemporalEpisodic,
+		DefaultAssembly: pkg.AssemblyFull,
+		BridgePolicy:    pkg.BridgeAgentRequested,
+		ActivityProfile: pkg.ActivityNormal,
+		CommitHash:      hash,
+	}
+	if d.TemporalMode != "" {
+		p.TemporalMode = pkg.TemporalMode(d.TemporalMode)
+	}
+	if d.AssemblyProfile != "" {
+		p.DefaultAssembly = pkg.AssemblyProfile(d.AssemblyProfile)
+	}
+	if d.BridgePolicy != "" {
+		p.BridgePolicy = pkg.BridgePolicy(d.BridgePolicy)
+	}
+	if d.MetabolismPolicy != "" {
+		p.MetabolismPolicy = d.MetabolismPolicy
+	}
+	return p
 }
 
 // PolicyReader reads lifecycle policy from a workspace file and compares
@@ -90,32 +92,35 @@ func (r *PolicyReader) PolicyPath() string {
 	return filepath.Join(r.workspacePath, "lifecycle.json")
 }
 
-// Read reads and validates the lifecycle policy file.
-// Returns the policy, its SHA-256 hash, and any error.
-// If the file does not exist, returns (nil, "", nil).
-func (r *PolicyReader) Read() (*LifecyclePolicy, string, error) {
+// Read reads and validates the lifecycle policy file, returning the canonical
+// pkg.LifecyclePolicy type directly. Returns the policy, its SHA-256 hash,
+// and any error. If the file does not exist, returns (zero-value, "", nil).
+func (r *PolicyReader) Read() (pkg.LifecyclePolicy, string, error) {
 	path := r.PolicyPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, "", nil
+			return pkg.LifecyclePolicy{}, "", nil
 		}
-		return nil, "", fmt.Errorf("policy: reading %s: %w", path, err)
+		return pkg.LifecyclePolicy{}, "", fmt.Errorf("policy: reading %s: %w", path, err)
 	}
 
-	var policy LifecyclePolicy
-	if err := json.Unmarshal(data, &policy); err != nil {
-		return nil, "", fmt.Errorf("policy: parsing %s: %w", path, err)
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+
+	var doc policyDocument
+	if err := dec.Decode(&doc); err != nil {
+		return pkg.LifecyclePolicy{}, "", fmt.Errorf("policy: parsing %s: %w", path, err)
 	}
 
-	if err := policy.Validate(); err != nil {
-		return nil, "", err
+	if err := doc.validate(); err != nil {
+		return pkg.LifecyclePolicy{}, "", err
 	}
 
 	hash := sha256.Sum256(data)
 	hexHash := hex.EncodeToString(hash[:])
 
-	return &policy, hexHash, nil
+	return doc.toCanonical(hexHash), hexHash, nil
 }
 
 // HasChanged compares the given hash against the last applied configuration hash.
@@ -135,7 +140,6 @@ func (r *PolicyReader) HasChanged(ctx context.Context, currentHash string) (bool
 	var previousHash string
 	if err := row.Scan(&previousHash); err != nil {
 		if err == sql.ErrNoRows {
-			// No previous record — this is the first application.
 			return true, "", nil
 		}
 		return false, "", fmt.Errorf("policy: querying last applied hash: %w", err)

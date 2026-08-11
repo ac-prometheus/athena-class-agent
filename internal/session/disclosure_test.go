@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // ---------------------------------------------------------------------------
@@ -11,11 +13,11 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestGenerateDisclosure_NilOld_ReportsAllFields(t *testing.T) {
-	newPolicy := &LifecyclePolicy{
+	newPolicy := &pkg.LifecyclePolicy{
 		TemporalMode:     "episodic",
 		BridgePolicy:     "opt_in",
 		MetabolismPolicy: "standard",
-		AssemblyProfile:  "full",
+		DefaultAssembly:  "full",
 	}
 
 	d := GenerateDisclosure(nil, newPolicy)
@@ -35,7 +37,7 @@ func TestGenerateDisclosure_NilOld_ReportsAllFields(t *testing.T) {
 }
 
 func TestGenerateDisclosure_NilOld_EmptyNew(t *testing.T) {
-	d := GenerateDisclosure(nil, &LifecyclePolicy{})
+	d := GenerateDisclosure(nil, &pkg.LifecyclePolicy{})
 
 	if d == nil {
 		t.Fatal("GenerateDisclosure returned nil")
@@ -49,7 +51,7 @@ func TestGenerateDisclosure_NilOld_EmptyNew(t *testing.T) {
 }
 
 func TestGenerateDisclosure_NilOld_PartialNew(t *testing.T) {
-	d := GenerateDisclosure(nil, &LifecyclePolicy{
+	d := GenerateDisclosure(nil, &pkg.LifecyclePolicy{
 		TemporalMode: "diurnal",
 	})
 
@@ -62,8 +64,8 @@ func TestGenerateDisclosure_NilOld_PartialNew(t *testing.T) {
 }
 
 func TestGenerateDisclosure_ChangedTemporalMode(t *testing.T) {
-	old := &LifecyclePolicy{TemporalMode: "episodic"}
-	new := &LifecyclePolicy{TemporalMode: "diurnal"}
+	old := &pkg.LifecyclePolicy{TemporalMode: "episodic"}
+	new := &pkg.LifecyclePolicy{TemporalMode: "diurnal"}
 
 	d := GenerateDisclosure(old, new)
 
@@ -79,8 +81,8 @@ func TestGenerateDisclosure_ChangedTemporalMode(t *testing.T) {
 }
 
 func TestGenerateDisclosure_ChangedBridgePolicy(t *testing.T) {
-	old := &LifecyclePolicy{BridgePolicy: "opt_in"}
-	new := &LifecyclePolicy{BridgePolicy: "always"}
+	old := &pkg.LifecyclePolicy{BridgePolicy: "opt_in"}
+	new := &pkg.LifecyclePolicy{BridgePolicy: "always"}
 
 	d := GenerateDisclosure(old, new)
 	if len(d.Changes) != 1 {
@@ -92,8 +94,8 @@ func TestGenerateDisclosure_ChangedBridgePolicy(t *testing.T) {
 }
 
 func TestGenerateDisclosure_ChangedMetabolismPolicy(t *testing.T) {
-	old := &LifecyclePolicy{MetabolismPolicy: "standard"}
-	new := &LifecyclePolicy{MetabolismPolicy: "deferred"}
+	old := &pkg.LifecyclePolicy{MetabolismPolicy: "standard"}
+	new := &pkg.LifecyclePolicy{MetabolismPolicy: "deferred"}
 
 	d := GenerateDisclosure(old, new)
 	if len(d.Changes) != 1 {
@@ -105,8 +107,8 @@ func TestGenerateDisclosure_ChangedMetabolismPolicy(t *testing.T) {
 }
 
 func TestGenerateDisclosure_ChangedAssemblyProfile(t *testing.T) {
-	old := &LifecyclePolicy{AssemblyProfile: "full"}
-	new := &LifecyclePolicy{AssemblyProfile: "light"}
+	old := &pkg.LifecyclePolicy{DefaultAssembly: "full"}
+	new := &pkg.LifecyclePolicy{DefaultAssembly: "light"}
 
 	d := GenerateDisclosure(old, new)
 	if len(d.Changes) != 1 {
@@ -118,11 +120,11 @@ func TestGenerateDisclosure_ChangedAssemblyProfile(t *testing.T) {
 }
 
 func TestGenerateDisclosure_NoChanges(t *testing.T) {
-	policy := &LifecyclePolicy{
+	policy := &pkg.LifecyclePolicy{
 		TemporalMode:     "episodic",
 		BridgePolicy:     "opt_in",
 		MetabolismPolicy: "standard",
-		AssemblyProfile:  "full",
+		DefaultAssembly:  "full",
 	}
 	// Same values
 	d := GenerateDisclosure(policy, policy)
@@ -136,17 +138,17 @@ func TestGenerateDisclosure_NoChanges(t *testing.T) {
 }
 
 func TestGenerateDisclosure_MultipleChanges(t *testing.T) {
-	old := &LifecyclePolicy{
+	old := &pkg.LifecyclePolicy{
 		TemporalMode:     "episodic",
 		BridgePolicy:     "opt_in",
 		MetabolismPolicy: "standard",
-		AssemblyProfile:  "full",
+		DefaultAssembly:  "full",
 	}
-	new := &LifecyclePolicy{
+	new := &pkg.LifecyclePolicy{
 		TemporalMode:     "continuous",
 		BridgePolicy:     "never",
 		MetabolismPolicy: "skip",
-		AssemblyProfile:  "minimal",
+		DefaultAssembly:  "minimal",
 	}
 
 	d := GenerateDisclosure(old, new)
@@ -157,7 +159,7 @@ func TestGenerateDisclosure_MultipleChanges(t *testing.T) {
 
 func TestGenerateDisclosure_AppliedAtIsSet(t *testing.T) {
 	before := time.Now().UTC().Add(-time.Second)
-	d := GenerateDisclosure(nil, &LifecyclePolicy{TemporalMode: "episodic"})
+	d := GenerateDisclosure(nil, &pkg.LifecyclePolicy{TemporalMode: "episodic"})
 	after := time.Now().UTC().Add(time.Second)
 
 	if d.AppliedAt.Before(before) || d.AppliedAt.After(after) {
