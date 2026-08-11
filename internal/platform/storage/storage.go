@@ -49,3 +49,13 @@ func beliefMetaJSON(b *pkg.BeliefMeta) string {
 	raw, _ := json.Marshal(m)
 	return string(raw)
 }
+
+// embeddingJSON serializes a float32 embedding vector as a JSON array string
+// for storage in SQLite TEXT columns. Returns NULL-safe empty string for nil/empty vectors.
+func embeddingJSON(vec []float32) any {
+	if len(vec) == 0 {
+		return nil
+	}
+	raw, _ := json.Marshal(vec)
+	return string(raw)
+}
