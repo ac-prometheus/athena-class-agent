@@ -681,7 +681,7 @@ func TestLifecycleStore_InterruptStaleCheckpoints(t *testing.T) {
 		t.Fatalf("WriteCheckpoint: %v", err)
 	}
 
-	cutoff := time.Now().Add(-30 * time.Minute)
+	cutoff := time.Now().Add(-5 * time.Minute)
 	n, err := store.InterruptStaleCheckpoints(ctx, cutoff)
 	if err != nil {
 		t.Fatalf("InterruptStaleCheckpoints: %v", err)
