@@ -58,7 +58,7 @@ func (r *SessionRunner) RunSession(wakeReason string, inbandNotes []string) erro
 
 	// 2. Check for policy change and produce a disclosure note if changed.
 	var disclosureNote string
-	if localPolicy != nil {
+	if localPolicy != nil && policyHash != "" {
 		changed, prevHash, changeErr := policyReader.HasChanged(ctx, policyHash)
 		if changeErr != nil {
 			r.logger.Warn("lifecycle: policy change check failed", "err", changeErr)
