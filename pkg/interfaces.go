@@ -342,3 +342,112 @@ type ContentGateway interface {
 	ProcessInbound(ctx context.Context, raw []byte, source, contentSource string) (*AnnotatedContent, error)
 	ReviewOutbound(ctx context.Context, content string) (*OutboundReport, error)
 }
+
+// ---------------------------------------------------------------------------
+// Sprint 3E — Repository Ports (HARN-72)
+//
+// Domain packages say "commit job" and "record disclosure," not
+// "use $1 when driver is postgres." Implementations live in
+// internal/platform/storage/.
+// ---------------------------------------------------------------------------
+
+// MetabolismJobStore manages durable metabolism job records.
+// The job record is the source of durability — it must be committed
+// before dispatch and completed/failed after processing.
+type MetabolismJobStore interface {
+	// Commit inserts a new pending job. Must be called and committed
+	// BEFORE dispatching the processing goroutine. Returns the job ID.
+	Commit(ctx context.Context, sessionID, jobType string) (jobID string, err error)
+
+	// Claim atomically transitions a pending job to running.
+	// Returns ErrJobNotPending if already claimed.
+	Claim(ctx context.Context, jobID string) error
+
+	// Complete marks a job as successfully finished.
+	Complete(ctx context.Context, jobID string) error
+
+	// Fail marks a job as failed with an error message and increments retry count.
+	Fail(ctx context.Context, jobID string, cause string) error
+
+	// Recoverable returns IDs and session IDs of jobs in pending or running
+	// state that haven't exceeded maxRetries. Recovery resubmits these
+	// through the normal Claim → process → Complete/Fail path.
+	Recoverable(ctx context.Context, maxRetries int) ([]RecoverableJob, error)
+
+	// LastStatus returns the most recent job's status, or "" if no jobs exist.
+	// Used for operational state input to the lifecycle resolver.
+	LastStatus(ctx context.Context) (string, error)
+}
+
+// RecoverableJob is the minimal info needed to resubmit a stalled job.
+type RecoverableJob struct {
+	JobID      string
+	SessionID  string
+	RetryCount int
+}
+
+// ConsolidationStore handles the atomic T2→T3 link: inserting a narrative
+// summary and updating the source experiential logs in one transaction.
+type ConsolidationStore interface {
+	// CommitNarrative atomically inserts the T3 narrative and updates all
+	// source T2 log rows with the narrative's ID. The embedding vector
+	// must be included in the narrative for retrieval to work.
+	CommitNarrative(ctx context.Context, narrative *NarrativeSummary, sourceLogIDs []string) error
+
+	// UncoveredLogs returns T2 experiential logs for a session that have
+	// no narrative_summary_id — the inputs for consolidation.
+	UncoveredLogs(ctx context.Context, sessionID string) ([]ExperientialLog, error)
+}
+
+// LifecycleStore persists the lifecycle artifacts that connect sessions
+// into a continuous history: plans, wake facts, assembly manifests,
+// configuration disclosures, and checkpoints.
+type LifecycleStore interface {
+	// RecordPlan persists a resolved lifecycle plan before assembly.
+	RecordPlan(ctx context.Context, plan *LifecyclePlan) error
+
+	// RecordWakeFacts persists the observed facts about a wake event.
+	RecordWakeFacts(ctx context.Context, sessionID string, facts *WakeFacts) error
+
+	// RecordManifest persists what assembly loaded, skipped, and why.
+	RecordManifest(ctx context.Context, manifest *AssemblyManifest) error
+
+	// RecordDisclosure persists an applied configuration change with
+	// the policy path, hash, previous hash, and a summary of changes.
+	RecordDisclosure(ctx context.Context, sessionID, policyPath, policyHash, previousHash, changesSummary string) error
+
+	// LastPolicyHash returns the most recently applied policy hash,
+	// or "" if no configuration has been applied.
+	LastPolicyHash(ctx context.Context, agentID string) (string, error)
+
+	// WriteCheckpoint upserts a session checkpoint (turn progress, token usage).
+	WriteCheckpoint(ctx context.Context, sessionID string, turnNumber int, t2HighWater string, tokenUsage int, state string) error
+
+	// InterruptStaleCheckpoints marks any active checkpoints older than
+	// the cutoff as interrupted. Returns the count of interrupted sessions.
+	InterruptStaleCheckpoints(ctx context.Context, cutoff time.Time) (int, error)
+
+	// LastCheckpointState returns the most recent checkpoint's state,
+	// or "" if none exist. Used for operational state input.
+	LastCheckpointState(ctx context.Context) (string, error)
+
+	// LastWakeAt returns the timestamp of the most recent wake, or the
+	// zero time if no wakes are recorded.
+	LastWakeAt(ctx context.Context) (time.Time, error)
+}
+
+// AssemblyStore handles identity persistence operations used during
+// context assembly: witness letter verification and operator action logging.
+type AssemblyStore interface {
+	// HasWitnessLetter returns true if a founding record of type
+	// 'witness_letter' exists.
+	HasWitnessLetter(ctx context.Context) (bool, error)
+
+	// LogOperatorAction records a system action in the operator_actions
+	// audit trail.
+	LogOperatorAction(ctx context.Context, actionType, description string) error
+}
+
+// ErrJobNotPending is returned by MetabolismJobStore.Claim when the job
+// is not in pending state (already claimed or completed).
+var ErrJobNotPending = errors.New("job is not in pending state")
