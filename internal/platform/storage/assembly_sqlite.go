@@ -3,7 +3,6 @@ package storage
 import (
 	"context"
 	"fmt"
-	"log/slog"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 )
@@ -23,8 +22,7 @@ func (s *SQLiteAssemblyStore) HasWitnessLetter(ctx context.Context) (bool, error
 		`SELECT COUNT(*) FROM founding_records WHERE record_type = 'witness_letter'`)
 	var count int
 	if err := row.Scan(&count); err != nil {
-		slog.Warn("storage: could not query founding_records", "err", err)
-		return false, nil
+		return false, fmt.Errorf("storage: querying founding_records: %w", err)
 	}
 	return count > 0, nil
 }
@@ -37,7 +35,6 @@ func (s *SQLiteAssemblyStore) LogOperatorAction(ctx context.Context, actionType,
 		id, actionType, description,
 	)
 	if err != nil {
-		slog.Warn("storage: could not write operator_action", "action_type", actionType, "err", err)
 		return fmt.Errorf("storage: logging operator action: %w", err)
 	}
 	return nil
