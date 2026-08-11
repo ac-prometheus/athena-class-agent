@@ -2,6 +2,7 @@ package metabolism
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 
@@ -73,23 +74,37 @@ func (p *Pipeline) WithCompression(memStore pkg.MemoryStore, llmFn func(string) 
 // Phase 1: Score salience on all T2 logs.
 // Phase 2: Aegis-gated T2→T3 compression (separate file).
 // Phase 3: Dream cycle (Sprint 4 — not implemented here).
+//
+// When a ConsolidationStore is wired, UncoveredLogs is used instead of
+// QueryLogs to make retries idempotent — logs already linked to a
+// narrative are skipped, preventing T3 duplicates.
 func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string) error {
 	slog.Info("metabolism: starting", "session", sessionID)
 
-	// Phase 1: Salience scoring
-	// QueryLogs with limit=0 returns all logs for the session.
-	logs, err := p.store.QueryLogs(ctx, sessionID, 0)
-	if err != nil {
-		return fmt.Errorf("metabolism: load T2 logs: %w", err)
+	// Load T2 logs. Prefer UncoveredLogs (idempotent on retry) over
+	// QueryLogs (which would re-process already-linked logs).
+	var logs []pkg.ExperientialLog
+	var err error
+	if p.consolidation != nil {
+		logs, err = p.consolidation.UncoveredLogs(ctx, sessionID)
+		if err != nil {
+			return fmt.Errorf("metabolism: load uncovered T2 logs: %w", err)
+		}
+		slog.Info("metabolism: loaded uncovered logs", "session", sessionID, "count", len(logs))
+	} else {
+		logs, err = p.store.QueryLogs(ctx, sessionID, 0)
+		if err != nil {
+			return fmt.Errorf("metabolism: load T2 logs: %w", err)
+		}
 	}
 
-	scores, err := p.scorer.ScoreLogs(ctx, logs)
+	// Phase 1: Salience scoring
+	var scores []SalienceResult
+	scored, err := p.scorer.ScoreLogs(ctx, logs)
 	if err != nil {
 		slog.Warn("metabolism: salience scoring failed — using defaults", "err", err)
 	} else {
-		// ExperientialLog has no SalienceScore field — log the scored results
-		// for observability. Compression (Phase 2) will consume them directly
-		// from the SalienceResult slice rather than via a field on the log.
+		scores = scored
 		for i, score := range scores {
 			if i < len(logs) {
 				slog.Debug("metabolism: salience score",
@@ -112,8 +127,13 @@ func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string) error {
 			Embedder: p.embedder,
 		}
 
-		narrative, err := CompressSession(ctx, cfg, sessionID, logs)
+		narrative, err := CompressSession(ctx, cfg, sessionID, logs, scores)
 		if err != nil {
+			// ErrReviewRequired is not a failure — propagate it so the
+			// job runner can mark the job as review_required.
+			if errors.Is(err, ErrReviewRequired) {
+				return err
+			}
 			return fmt.Errorf("metabolism: compression failed: %w", err)
 		}
 

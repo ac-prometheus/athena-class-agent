@@ -170,6 +170,31 @@ func mustRandHex(n int) string {
 	return hex.EncodeToString(b)
 }
 
+// queryLastPolicy loads the most recently resolved lifecycle plan's policy
+// fields from lifecycle_plans. Used when the policy file is invalid (parse or
+// validation error) to fall back to the last known-good configuration instead
+// of inventing defaults, and to supply the "old" policy for disclosure
+// comparison. Returns nil when no prior plan exists.
+func queryLastPolicy(ctx context.Context, db platform.DB) *session.LifecyclePolicy {
+	if db == nil {
+		return nil
+	}
+	row := db.QueryRowContext(ctx,
+		`SELECT temporal_mode, assembly_profile, bridge_policy, metabolism_policy
+		 FROM lifecycle_plans ORDER BY resolved_at DESC LIMIT 1`,
+	)
+	var tm, ap, bp, mp string
+	if err := row.Scan(&tm, &ap, &bp, &mp); err != nil {
+		return nil
+	}
+	return &session.LifecyclePolicy{
+		TemporalMode:     tm,
+		AssemblyProfile:  ap,
+		BridgePolicy:     bp,
+		MetabolismPolicy: mp,
+	}
+}
+
 // RedactDSN removes credentials from a DSN for logging.
 func RedactDSN(dsn string) string {
 	if dsn == "" {

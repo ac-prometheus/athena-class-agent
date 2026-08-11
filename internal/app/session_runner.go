@@ -46,9 +46,13 @@ func (r *SessionRunner) RunSession(wakeReason string, inbandNotes []string) erro
 	policyReader := session.NewPolicyReader(r.deps.Config.WorkspaceDir, r.deps.DB)
 	localPolicy, policyHash, err := policyReader.Read()
 	if err != nil {
-		r.logger.Warn("lifecycle: policy read error — using defaults", "err", err)
-		localPolicy = nil
+		r.logger.Warn("lifecycle: policy read error — loading last valid snapshot", "err", err)
+		// Fall back to the last resolved plan's policy instead of inventing defaults.
+		localPolicy = queryLastPolicy(ctx, r.deps.DB)
 		policyHash = ""
+		if localPolicy != nil {
+			r.logger.Info("lifecycle: fell back to last valid policy from lifecycle_plans")
+		}
 	}
 	pkgPolicy := localPolicyToPkg(localPolicy, policyHash)
 
@@ -59,7 +63,10 @@ func (r *SessionRunner) RunSession(wakeReason string, inbandNotes []string) erro
 		if changeErr != nil {
 			r.logger.Warn("lifecycle: policy change check failed", "err", changeErr)
 		} else if changed {
-			disclosure := session.GenerateDisclosure(nil, localPolicy)
+			// Load the previous policy for field-level comparison instead of
+			// treating every change as an initial application (nil old).
+			oldPolicy := queryLastPolicy(ctx, r.deps.DB)
+			disclosure := session.GenerateDisclosure(oldPolicy, localPolicy)
 			disclosure.PolicyPath = policyReader.PolicyPath()
 			disclosure.OldHash = prevHash
 			disclosure.NewHash = policyHash

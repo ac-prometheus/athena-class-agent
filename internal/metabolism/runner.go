@@ -76,6 +76,19 @@ func (r *JobRunner) Run(ctx context.Context, jobID, sessionID string) error {
 		"job_id", jobID, "session_id", sessionID)
 
 	if err := r.pipeline.ProcessSession(ctx, sessionID); err != nil {
+		// ErrReviewRequired is not a crash — external content needs human
+		// review before it can be promoted. Mark the job review_required
+		// instead of failed so it won't be retried automatically.
+		if errors.Is(err, ErrReviewRequired) {
+			r.logger.Info("jobrunner: pipeline requires review — marking review_required",
+				"job_id", jobID, "session_id", sessionID)
+			if rErr := r.store.MarkReviewRequired(ctx, jobID, err.Error()); rErr != nil {
+				r.logger.Error("jobrunner: failed to record review_required",
+					"job_id", jobID, "err", rErr)
+			}
+			return nil // not an error — the job stopped intentionally
+		}
+
 		r.logger.Error("jobrunner: pipeline failed — marking job failed",
 			"job_id", jobID, "session_id", sessionID, "err", err)
 		if fErr := r.store.Fail(ctx, jobID, err.Error()); fErr != nil {

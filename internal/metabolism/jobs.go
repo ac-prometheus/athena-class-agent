@@ -15,11 +15,12 @@ import (
 type JobStatus string
 
 const (
-	JobStatusPending     JobStatus = "pending"
-	JobStatusRunning     JobStatus = "running"
-	JobStatusCompleted   JobStatus = "completed"
-	JobStatusFailed      JobStatus = "failed"
-	JobStatusInterrupted JobStatus = "interrupted"
+	JobStatusPending        JobStatus = "pending"
+	JobStatusRunning        JobStatus = "running"
+	JobStatusCompleted      JobStatus = "completed"
+	JobStatusFailed         JobStatus = "failed"
+	JobStatusInterrupted    JobStatus = "interrupted"
+	JobStatusReviewRequired JobStatus = "review_required"
 )
 
 // MetabolismJob is the in-memory representation of a metabolism_jobs row.

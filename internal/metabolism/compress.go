@@ -10,6 +10,10 @@ import (
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
+// ErrReviewRequired is returned when external content lacks Aegis annotation
+// and must be reviewed before compression can proceed. The T2 logs stay intact.
+var ErrReviewRequired = fmt.Errorf("compress: external content requires review before promotion")
+
 // CompressConfig holds the dependencies for T2→T3 compression.
 type CompressConfig struct {
 	Store   pkg.MemoryStore
@@ -31,7 +35,7 @@ type CompressConfig struct {
 //   - [INFERRED] — the summarizer drew this conclusion
 //   - [DELIBERATION NOT VISIBLE] — a decision was reached but reasoning not captured
 //   - [RESOLVED BY SUMMARY] — the summarizer collapsed an ambiguity
-func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, logs []pkg.ExperientialLog) (*pkg.NarrativeSummary, error) {
+func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, logs []pkg.ExperientialLog, scores []SalienceResult) (*pkg.NarrativeSummary, error) {
 	if len(logs) == 0 {
 		return nil, nil
 	}
@@ -40,31 +44,38 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 	}
 
 	// Aegis gate: verify all external content has been screened.
+	// If external content has no Aegis gateway to screen it, the job must
+	// stop with review_required — T2 stays intact, nothing is promoted.
 	var contentParts []string
 	for _, log := range logs {
 		entry := log.Content
 		if isExternalSource(log.ContentSource) {
-			if cfg.Aegis != nil {
-				annotated, err := cfg.Aegis.ProcessInbound(ctx, []byte(entry), "compression", log.ContentSource)
-				if err != nil {
-					slog.Warn("compress: aegis scan error — bracketing as untrusted", "log_id", log.ID, "err", err)
-					entry = bracketUntrusted(entry, log.ContentSource)
-				} else if !annotated.Annotation.ScanPassed {
-					slog.Warn("compress: aegis flagged content — bracketing as untrusted",
-						"log_id", log.ID,
-						"flags", annotated.Annotation.Flags,
-						"trust", annotated.Annotation.TrustScore,
-					)
-					entry = bracketUntrusted(entry, log.ContentSource)
-				}
-			} else {
+			if cfg.Aegis == nil {
+				// No Aegis gateway available — cannot screen external content.
+				// Return ErrReviewRequired so the job is marked review_required
+				// instead of silently bracketing and promoting untrusted text.
+				slog.Warn("compress: external content without Aegis — review required",
+					"log_id", log.ID, "source", log.ContentSource)
+				return nil, ErrReviewRequired
+			}
+			annotated, err := cfg.Aegis.ProcessInbound(ctx, []byte(entry), "compression", log.ContentSource)
+			if err != nil {
+				slog.Warn("compress: aegis scan error — bracketing as untrusted", "log_id", log.ID, "err", err)
+				entry = bracketUntrusted(entry, log.ContentSource)
+			} else if !annotated.Annotation.ScanPassed {
+				slog.Warn("compress: aegis flagged content — bracketing as untrusted",
+					"log_id", log.ID,
+					"flags", annotated.Annotation.Flags,
+					"trust", annotated.Annotation.TrustScore,
+				)
 				entry = bracketUntrusted(entry, log.ContentSource)
 			}
 		}
 		contentParts = append(contentParts, entry)
 	}
 
-	prompt := buildCompressionPrompt(contentParts)
+	// Build salience-weighted compression prompt.
+	prompt := buildCompressionPrompt(contentParts, scores)
 	compressed, err := cfg.LLMFn(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("compress: LLM compression call: %w", err)
@@ -99,12 +110,20 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 }
 
 // buildCompressionPrompt constructs the LLM prompt for T2→T3 compression
-// with honesty tag instructions.
-func buildCompressionPrompt(entries []string) string {
+// with honesty tag instructions and salience weighting.
+func buildCompressionPrompt(entries []string, scores []SalienceResult) string {
 	var b strings.Builder
 	b.WriteString("Compress the following session logs into a narrative summary. ")
 	b.WriteString("Preserve: standing commitments, decisions with reasoning, verification events, ")
 	b.WriteString("relational updates, key facts with sources, open questions.\n\n")
+
+	// Include salience weighting instructions when scores are available.
+	if len(scores) > 0 {
+		b.WriteString("Each log entry has a SALIENCE SCORE (0.0–1.0). Higher scores indicate ")
+		b.WriteString("greater importance. Entries with high compression_resist should be preserved ")
+		b.WriteString("with more detail; low-salience entries can be summarized more aggressively.\n\n")
+	}
+
 	b.WriteString("REQUIRED: Use structural honesty tags where the summarizer intervenes:\n")
 	b.WriteString("- [UNCERTAIN] — the original held this as uncertain; preserve the uncertainty\n")
 	b.WriteString("- [INFERRED] — you drew this conclusion; it was not stated explicitly\n")
@@ -114,7 +133,12 @@ func buildCompressionPrompt(entries []string) string {
 	b.WriteString("Do not launder external claims into the agent's own voice.\n\n")
 	b.WriteString("--- SESSION LOGS ---\n\n")
 	for i, entry := range entries {
-		b.WriteString(fmt.Sprintf("[%d] %s\n\n", i+1, entry))
+		if i < len(scores) {
+			b.WriteString(fmt.Sprintf("[%d] (salience=%.2f, resist=%.2f) %s\n\n",
+				i+1, scores[i].Score, scores[i].CompressionResist, entry))
+		} else {
+			b.WriteString(fmt.Sprintf("[%d] %s\n\n", i+1, entry))
+		}
 	}
 	return b.String()
 }

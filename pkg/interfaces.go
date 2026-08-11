@@ -369,6 +369,11 @@ type MetabolismJobStore interface {
 	// Fail marks a job as failed with an error message and increments retry count.
 	Fail(ctx context.Context, jobID string, cause string) error
 
+	// MarkReviewRequired transitions a job to review_required status.
+	// Used when external content lacks Aegis annotation and cannot be
+	// compressed automatically. The job is not retried — it awaits review.
+	MarkReviewRequired(ctx context.Context, jobID string, reason string) error
+
 	// Recoverable returns IDs and session IDs of jobs in pending or running
 	// state that haven't exceeded maxRetries. Recovery resubmits these
 	// through the normal Claim → process → Complete/Fail path.

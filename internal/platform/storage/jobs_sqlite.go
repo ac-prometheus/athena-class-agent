@@ -77,6 +77,19 @@ func (s *SQLiteJobStore) Fail(ctx context.Context, jobID string, cause string) e
 	return nil
 }
 
+func (s *SQLiteJobStore) MarkReviewRequired(ctx context.Context, jobID string, reason string) error {
+	_, err := s.db.ExecContext(ctx,
+		`UPDATE metabolism_jobs
+		 SET status = 'review_required', error_message = ?, completed_at = CURRENT_TIMESTAMP
+		 WHERE id = ?`,
+		reason, jobID,
+	)
+	if err != nil {
+		return fmt.Errorf("storage: marking job %s review_required: %w", jobID, err)
+	}
+	return nil
+}
+
 func (s *SQLiteJobStore) Recoverable(ctx context.Context, maxRetries int) ([]pkg.RecoverableJob, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, session_id, retry_count
