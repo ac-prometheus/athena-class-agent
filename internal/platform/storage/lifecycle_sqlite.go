@@ -186,7 +186,7 @@ func (s *SQLiteLifecycleStore) InterruptStaleCheckpoints(ctx context.Context, cu
 		`UPDATE session_checkpoints
 		 SET state = 'interrupted'
 		 WHERE state = 'active' AND created_at < ?`,
-		cutoff,
+		cutoff.UTC().Format("2006-01-02 15:04:05"),
 	)
 	if err != nil {
 		return 0, fmt.Errorf("storage: interrupting stale checkpoints: %w", err)

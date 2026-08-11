@@ -665,9 +665,9 @@ func TestLifecycleStore_InterruptStaleCheckpoints(t *testing.T) {
 	ctx := context.Background()
 	store := NewSQLiteLifecycleStore(db)
 
-	// Insert a checkpoint with an old timestamp using Go time formatting
-	// to match how the sqlite3 driver formats time.Time values.
-	oldTime := time.Now().Add(-1 * time.Hour)
+	// Insert a checkpoint with an old timestamp using SQLite's datetime format
+	// to match CURRENT_TIMESTAMP output (YYYY-MM-DD HH:MM:SS).
+	oldTime := time.Now().Add(-1 * time.Hour).UTC().Format("2006-01-02 15:04:05")
 	_, err := raw.Exec(
 		`INSERT INTO session_checkpoints (id, session_id, turn_number, t2_high_water, token_usage, state, created_at)
 		 VALUES ('cp-old', 'sess-old', 3, '', 10000, 'active', ?)`, oldTime,
@@ -681,7 +681,7 @@ func TestLifecycleStore_InterruptStaleCheckpoints(t *testing.T) {
 		t.Fatalf("WriteCheckpoint: %v", err)
 	}
 
-	cutoff := time.Now().Add(-5 * time.Minute)
+	cutoff := time.Now().Add(-5 * time.Minute).UTC()
 	n, err := store.InterruptStaleCheckpoints(ctx, cutoff)
 	if err != nil {
 		t.Fatalf("InterruptStaleCheckpoints: %v", err)
