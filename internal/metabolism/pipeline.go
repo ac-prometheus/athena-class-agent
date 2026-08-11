@@ -13,14 +13,15 @@ import (
 // T2→T3 compression, and (future) dream cycle. Dispatched asynchronously
 // from Session.End() via a durable job record.
 type Pipeline struct {
-	store      pkg.T2QueryStore
-	aegis      pkg.ContentGateway
-	scorer     SalienceScorer
-	db         platform.DB
-	driverName string
-	memStore   pkg.MemoryStore
-	llmFn      func(string) (string, error)
-	embedder   pkg.EmbeddingProvider
+	store         pkg.T2QueryStore
+	aegis         pkg.ContentGateway
+	scorer        SalienceScorer
+	db            platform.DB            // retained for legacy AtomicT2T3Link fallback
+	driverName    string
+	memStore      pkg.MemoryStore
+	llmFn         func(string) (string, error)
+	embedder      pkg.EmbeddingProvider
+	consolidation pkg.ConsolidationStore // nil = fall back to raw AtomicT2T3Link
 }
 
 // NewPipeline creates a metabolism pipeline with the given dependencies.
@@ -50,6 +51,13 @@ func NewPipeline(
 func (p *Pipeline) WithDB(db platform.DB, driverName string) *Pipeline {
 	p.db = db
 	p.driverName = driverName
+	return p
+}
+
+// WithConsolidation attaches a ConsolidationStore for atomic T2→T3 linking.
+// When set, ProcessSession uses CommitNarrative instead of the raw AtomicT2T3Link.
+func (p *Pipeline) WithConsolidation(cs pkg.ConsolidationStore) *Pipeline {
+	p.consolidation = cs
 	return p
 }
 
@@ -115,7 +123,12 @@ func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string) error {
 				sourceLogIDs[i] = log.ID
 			}
 
-			if err := AtomicT2T3Link(ctx, p.db, p.driverName, narrative, sourceLogIDs); err != nil {
+			// Prefer ConsolidationStore.CommitNarrative; fall back to raw AtomicT2T3Link.
+			if p.consolidation != nil {
+				if err := p.consolidation.CommitNarrative(ctx, narrative, sourceLogIDs); err != nil {
+					return fmt.Errorf("metabolism: consolidation store commit failed: %w", err)
+				}
+			} else if err := AtomicT2T3Link(ctx, p.db, p.driverName, narrative, sourceLogIDs); err != nil {
 				return fmt.Errorf("metabolism: atomic T2-T3 link failed: %w", err)
 			}
 

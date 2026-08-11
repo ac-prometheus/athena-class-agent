@@ -23,6 +23,7 @@ type Daemon struct {
 	driverName string      // "sqlite3" or "postgres"
 	pipeline   *metabolism.Pipeline
 	maxRetries int // max retries for metabolism job recovery (default 3)
+	jobStore   pkg.MetabolismJobStore // nil = fall back to raw DB recovery
 }
 
 // sessionRunner is the minimal interface the daemon needs from assembly.
@@ -48,6 +49,12 @@ func New(cfg Config, runner sessionRunner) *Daemon {
 func (d *Daemon) WithDB(db platform.DB, driverName string) {
 	d.db = db
 	d.driverName = driverName
+}
+
+// WithJobStore attaches a MetabolismJobStore for store-based recovery at startup.
+// When set, recoverMetabolismJobs uses Recoverable() instead of raw SQL.
+func (d *Daemon) WithJobStore(js pkg.MetabolismJobStore) {
+	d.jobStore = js
 }
 
 // WithMetabolism attaches a metabolism pipeline for processing recovered jobs.
@@ -132,16 +139,47 @@ func (d *Daemon) scanInterruptedSessions(ctx context.Context) []string {
 	return notes
 }
 
-// recoverMetabolismJobs calls RecoverIncompleteJobs at startup and re-dispatches
-// each returned job through ProcessSession in a background goroutine.
+// recoverMetabolismJobs scans for incomplete metabolism jobs at startup and
+// re-dispatches each through ProcessSession in a background goroutine.
+// Prefers MetabolismJobStore.Recoverable; falls back to raw DB recovery.
 func (d *Daemon) recoverMetabolismJobs(ctx context.Context) {
-	if d.db == nil || d.pipeline == nil {
+	if d.pipeline == nil {
 		return
 	}
 
 	maxRetries := d.maxRetries
 	if maxRetries <= 0 {
 		maxRetries = 3
+	}
+
+	// Store-based recovery path.
+	if d.jobStore != nil {
+		recoverable, err := d.jobStore.Recoverable(ctx, maxRetries)
+		if err != nil {
+			slog.Warn("daemon: metabolism recovery scan (store) failed", "err", err)
+			return
+		}
+		if len(recoverable) == 0 {
+			return
+		}
+		slog.Info("daemon: recovering incomplete metabolism jobs (store)", "count", len(recoverable))
+		for _, rj := range recoverable {
+			rj := rj
+			go func() {
+				slog.Info("daemon: re-dispatching metabolism job",
+					"job_id", rj.JobID, "session_id", rj.SessionID)
+				if err := d.pipeline.ProcessSession(ctx, rj.SessionID); err != nil {
+					slog.Error("daemon: metabolism re-dispatch failed",
+						"job_id", rj.JobID, "session_id", rj.SessionID, "err", err)
+				}
+			}()
+		}
+		return
+	}
+
+	// Legacy raw DB recovery path.
+	if d.db == nil {
+		return
 	}
 
 	jobs, err := metabolism.RecoverIncompleteJobs(ctx, d.db, d.driverName, maxRetries)

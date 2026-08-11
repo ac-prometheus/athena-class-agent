@@ -99,13 +99,17 @@ func run() error {
 		}
 
 		runner = &lifecycleRunner{
-			cfg:        cfg,
-			client:     client,
-			assembler:  assembler,
-			db:         db,
-			driverName: driverName,
-			pipeline:   pipeline,
-			gateway:    nil, // TODO: wire Aegis gateway in Phase 5
+			cfg:           cfg,
+			client:        client,
+			assembler:     assembler,
+			db:            db,
+			jobs:          nil, // nil until HARN-73 (SQLite store impl)
+			consolidation: nil, // nil until HARN-73
+			lifecycle:     nil, // nil until HARN-73
+			assembly:      nil, // nil until HARN-73
+			driverName:    driverName,
+			pipeline:      pipeline,
+			gateway:       nil, // TODO: wire Aegis gateway in Phase 5
 		}
 	}
 
@@ -127,14 +131,23 @@ func run() error {
 
 // lifecycleRunner implements daemon.SessionRunner with full lifecycle resolution,
 // context assembly, engine loop, and end-of-session metabolism dispatch.
+//
+// Sprint 3E: repository ports replace raw platform.DB for domain operations.
+// Each store may be nil — RunSession degrades gracefully when stores are absent.
+// The db field is retained for subsystems not yet ported to store interfaces
+// (session checkpoint, assembly witness check, policy reader).
 type lifecycleRunner struct {
-	cfg        *platform.Config
-	client     pkg.LLMClient
-	assembler  *assembly.ContextAssembler
-	db         platform.DB
-	driverName string
-	pipeline   *metabolism.Pipeline
-	gateway    pkg.ContentGateway // Aegis, may be nil
+	cfg           *platform.Config
+	client        pkg.LLMClient
+	assembler     *assembly.ContextAssembler
+	db            platform.DB               // retained for session/assembly/policy (pre-port)
+	jobs          pkg.MetabolismJobStore     // nil = skip metabolism job commit
+	consolidation pkg.ConsolidationStore     // nil = skip T2→T3 (passed to pipeline)
+	lifecycle     pkg.LifecycleStore         // nil = skip plan/manifest/wake persistence
+	assembly      pkg.AssemblyStore          // nil = skip witness/audit via store
+	driverName    string
+	pipeline      *metabolism.Pipeline
+	gateway       pkg.ContentGateway // Aegis, may be nil
 }
 
 // RunSession executes a full agent session: resolve lifecycle plan → assemble
@@ -166,6 +179,13 @@ func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) er
 			disclosureNote = disclosure.ForContext()
 			slog.Info("lifecycle: policy change detected",
 				"new_hash", policyHash, "prev_hash", prevHash)
+
+			// Persist the disclosure via store if available.
+			if r.lifecycle != nil {
+				if dErr := r.lifecycle.RecordDisclosure(ctx, "", policyReader.PolicyPath(), policyHash, prevHash, disclosureNote); dErr != nil {
+					slog.Warn("lifecycle: RecordDisclosure failed", "err", dErr)
+				}
+			}
 		}
 	}
 
@@ -174,7 +194,13 @@ func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) er
 	wakeCause := wakeReasonToCause(wakeReason)
 
 	var prevActivityAt *time.Time
-	if r.db != nil {
+	if r.lifecycle != nil {
+		if t, err := r.lifecycle.LastWakeAt(ctx); err != nil {
+			slog.Debug("lifecycle: LastWakeAt via store failed", "err", err)
+		} else if !t.IsZero() {
+			prevActivityAt = &t
+		}
+	} else if r.db != nil {
 		prevActivityAt = queryLastWakeAt(ctx, r.db)
 	}
 
@@ -196,8 +222,9 @@ func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) er
 		SeamKind:        classifySeam(elapsed, prevActivityAt),
 	}
 
-	// 4. Build OperationalState from DB. Use zero-value on failure (graceful degradation).
-	opState := queryOperationalState(ctx, r.db)
+	// 4. Build OperationalState from stores (preferred) or raw DB (fallback).
+	// Zero-value on failure — the resolver handles the empty case gracefully.
+	opState := r.queryOperationalState(ctx)
 
 	// 5. Resolve lifecycle plan — purely functional, no I/O.
 	plan := lifecycle.Resolve(pkgPolicy, facts, opState, mustRandHex(16), wakeAt.UTC())
@@ -207,6 +234,16 @@ func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) er
 
 	// 7. Backfill SessionID into plan (resolver intentionally leaves it empty).
 	plan.SessionID = sess.GetID()
+
+	// 7a. Persist lifecycle artifacts via stores when available.
+	if r.lifecycle != nil {
+		if pErr := r.lifecycle.RecordPlan(ctx, plan); pErr != nil {
+			slog.Warn("lifecycle: RecordPlan failed", "err", pErr)
+		}
+		if wErr := r.lifecycle.RecordWakeFacts(ctx, sess.GetID(), &facts); wErr != nil {
+			slog.Warn("lifecycle: RecordWakeFacts failed", "err", wErr)
+		}
+	}
 
 	// 8. Build AssembleConfig. Merge inband notes with any disclosure generated above.
 	notes := make([]string, 0, len(inbandNotes)+1)
@@ -226,6 +263,13 @@ func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) er
 	assembled, err := r.assembler.Assemble(ctx, assembleCfg)
 	if err != nil {
 		return fmt.Errorf("lifecycle: assembling context: %w", err)
+	}
+
+	// 9a. Persist the assembly manifest via store when available.
+	if r.lifecycle != nil && assembled.Manifest != nil {
+		if mErr := r.lifecycle.RecordManifest(ctx, assembled.Manifest); mErr != nil {
+			slog.Warn("lifecycle: RecordManifest failed", "err", mErr)
+		}
 	}
 
 	// 10. Create engine with hooks and run the agentic loop.
@@ -272,7 +316,34 @@ func (r *lifecycleRunner) RunSession(wakeReason string, inbandNotes []string) er
 	}
 
 	// 12. Dispatch metabolism: commit a durable job record first, then run async.
-	if r.db != nil {
+	// Prefer the MetabolismJobStore interface; fall back to raw DB+SQL.
+	if r.jobs != nil {
+		jobID, jobErr := r.jobs.Commit(ctx, sess.GetID(), "standard")
+		if jobErr != nil {
+			slog.Warn("lifecycle: metabolism job commit (store) failed — skipping pipeline",
+				"session", sess.GetID(), "err", jobErr)
+		} else {
+			slog.Info("lifecycle: metabolism job committed", "job_id", jobID, "session", sess.GetID())
+			if r.pipeline != nil {
+				go func() {
+					if pErr := r.pipeline.ProcessSession(context.Background(), sess.GetID()); pErr != nil {
+						slog.Error("lifecycle: metabolism pipeline error",
+							"session", sess.GetID(), "err", pErr)
+						if fErr := r.jobs.Fail(ctx, jobID, pErr.Error()); fErr != nil {
+							slog.Error("lifecycle: metabolism job fail record failed",
+								"job_id", jobID, "err", fErr)
+						}
+						return
+					}
+					if cErr := r.jobs.Complete(ctx, jobID); cErr != nil {
+						slog.Error("lifecycle: metabolism job complete record failed",
+							"job_id", jobID, "err", cErr)
+					}
+				}()
+			}
+		}
+	} else if r.db != nil {
+		// Legacy path: raw SQL via metabolism package functions.
 		job, jobErr := metabolism.CommitJob(ctx, r.db, r.driverName, sess.GetID(), "standard")
 		if jobErr != nil {
 			slog.Warn("lifecycle: metabolism job commit failed — skipping pipeline",
@@ -478,38 +549,51 @@ func queryLastWakeAt(ctx context.Context, db platform.DB) *time.Time {
 }
 
 // queryOperationalState reads the previous session's runtime and metabolism
-// status from the DB for resolver input. Returns zero-value on any error —
-// the resolver handles the empty case gracefully.
-func queryOperationalState(ctx context.Context, db platform.DB) pkg.OperationalState {
-	if db == nil {
-		return pkg.OperationalState{}
-	}
-
-	// Query last metabolism job status.
+// status for resolver input. Prefers store interfaces; falls back to raw DB.
+// Returns zero-value on any error — the resolver handles the empty case gracefully.
+func (r *lifecycleRunner) queryOperationalState(ctx context.Context) pkg.OperationalState {
 	var metaStatus pkg.MetabolismStatus
-	metaRow := db.QueryRowContext(ctx,
-		`SELECT status FROM metabolism_jobs ORDER BY created_at DESC LIMIT 1`,
-	)
-	var rawStatus string
-	if err := metaRow.Scan(&rawStatus); err == nil {
-		metaStatus = pkg.MetabolismStatus(rawStatus)
+	var runtimeStatus pkg.RuntimeStatus
+
+	// Metabolism status: prefer MetabolismJobStore, fall back to raw DB.
+	if r.jobs != nil {
+		if s, err := r.jobs.LastStatus(ctx); err == nil && s != "" {
+			metaStatus = pkg.MetabolismStatus(s)
+		}
+	} else if r.db != nil {
+		metaRow := r.db.QueryRowContext(ctx,
+			`SELECT status FROM metabolism_jobs ORDER BY created_at DESC LIMIT 1`,
+		)
+		var rawStatus string
+		if err := metaRow.Scan(&rawStatus); err == nil {
+			metaStatus = pkg.MetabolismStatus(rawStatus)
+		}
 	}
 
-	// Query last session checkpoint state as a proxy for prior runtime status.
-	var runtimeStatus pkg.RuntimeStatus
-	cpRow := db.QueryRowContext(ctx,
-		`SELECT state FROM session_checkpoints ORDER BY created_at DESC LIMIT 1`,
-	)
-	var rawState string
-	if err := cpRow.Scan(&rawState); err == nil {
-		switch rawState {
-		case "interrupted":
-			runtimeStatus = pkg.RuntimeInterrupted
-		case "active":
-			// An active checkpoint from a prior run = interrupted session.
-			runtimeStatus = pkg.RuntimeInterrupted
-		default:
-			runtimeStatus = pkg.RuntimeEnded
+	// Runtime status: prefer LifecycleStore, fall back to raw DB.
+	if r.lifecycle != nil {
+		if s, err := r.lifecycle.LastCheckpointState(ctx); err == nil && s != "" {
+			switch s {
+			case "interrupted", "active":
+				runtimeStatus = pkg.RuntimeInterrupted
+			default:
+				runtimeStatus = pkg.RuntimeEnded
+			}
+		}
+	} else if r.db != nil {
+		cpRow := r.db.QueryRowContext(ctx,
+			`SELECT state FROM session_checkpoints ORDER BY created_at DESC LIMIT 1`,
+		)
+		var rawState string
+		if err := cpRow.Scan(&rawState); err == nil {
+			switch rawState {
+			case "interrupted":
+				runtimeStatus = pkg.RuntimeInterrupted
+			case "active":
+				runtimeStatus = pkg.RuntimeInterrupted
+			default:
+				runtimeStatus = pkg.RuntimeEnded
+			}
 		}
 	}
 
