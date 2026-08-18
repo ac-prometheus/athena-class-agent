@@ -514,44 +514,6 @@ func TestAcceptance_RecoveryAfterInterruptedLiveSession(t *testing.T) {
 var _ = fmt.Sprintf
 
 // ---------------------------------------------------------------------------
-// acceptanceApp — HARN-93: NewApp composition root for acceptance scenarios
-// ---------------------------------------------------------------------------
-
-// acceptanceApp creates a fully-wired *App from the real NewApp() constructor
-// rather than from manual Dependencies construction. It injects:
-//   - a pre-migrated in-memory SQLite DB via WithDB so NewApp skips DSN-open
-//   - a stubLLM via WithLLM so no real HTTP calls are made
-//
-// The DatabaseDSN is set to a non-postgres string so DriverNameFromDSN returns
-// "sqlite3" and creates the SQLite-backed repository stores — even though the
-// actual DB handle was injected and the DSN is never opened by NewApp.
-func acceptanceApp(t *testing.T, pdb platform.DB, opts ...Option) *App {
-	t.Helper()
-	identityDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(identityDir, "soul.md"), []byte("test identity"), 0644); err != nil {
-		t.Fatalf("acceptanceApp: write soul.md: %v", err)
-	}
-	cfg := &platform.Config{
-		AgentName:        "ersa-test",
-		WorkspaceDir:     t.TempDir(),
-		IdentityDir:      identityDir,
-		TokenBudget:      200000,
-		HardFloorTokens:  1500,
-		DatabaseDSN:      "file::memory:?cache=shared", // non-postgres → driverName "sqlite3"
-		SkipWitnessCheck: true,
-	}
-	defaults := []Option{
-		WithLLM(&stubLLM{}),
-		WithDB(pdb),
-	}
-	appInstance, err := NewApp(cfg, ProfileDevelopment, append(defaults, opts...)...)
-	if err != nil {
-		t.Fatalf("acceptanceApp: %v", err)
-	}
-	return appInstance
-}
-
-// ---------------------------------------------------------------------------
 // HARN-93 Scenario 1: Ordinary Episodic Return via NewApp
 // ---------------------------------------------------------------------------
 
@@ -561,7 +523,7 @@ func acceptanceApp(t *testing.T, pdb platform.DB, opts ...Option) *App {
 // session_checkpoints, and metabolism_jobs.
 func TestAcceptance_NewApp_OrdinaryEpisodicReturn(t *testing.T) {
 	rawDB, pdb := acceptanceDB(t)
-	appInstance := acceptanceApp(t, pdb)
+	appInstance := acceptanceApp(t, rawDB, pdb)
 
 	ctx := context.Background()
 	if err := appInstance.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
@@ -620,7 +582,7 @@ func TestAcceptance_NewApp_MetabolismInterruptionRecovery(t *testing.T) {
 
 	// Create the app through the real NewApp() composition root — equivalent
 	// to daemon restart after the crash.
-	appInstance := acceptanceApp(t, pdb)
+	appInstance := acceptanceApp(t, rawDB, pdb)
 
 	ctx := context.Background()
 
@@ -667,7 +629,7 @@ func TestAcceptance_NewApp_WakeBeforeMetabolismCompletion(t *testing.T) {
 		t.Fatalf("insert prior pending job: %v", err)
 	}
 
-	appInstance := acceptanceApp(t, pdb)
+	appInstance := acceptanceApp(t, rawDB, pdb)
 
 	ctx := context.Background()
 
