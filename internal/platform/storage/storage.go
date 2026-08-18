@@ -1,6 +1,14 @@
 // Package storage implements repository ports defined in pkg/interfaces.go.
 // Each implementation encapsulates SQL dialect so domain packages never see
 // placeholder syntax or driver-name strings.
+//
+// SQLITE-ONLY: All current implementations (jobs_sqlite.go, consolidation_sqlite.go,
+// lifecycle_sqlite.go, assembly_sqlite.go) target SQLite exclusively. They use
+// SQLite placeholder syntax (?) and assume SQLite-specific behaviour. PostgreSQL
+// implementations would live in separate files (e.g. jobs_postgres.go) and must
+// never be aliased to these SQLite implementations. The bootstrap and NewApp
+// constructors enforce this by rejecting postgres:// DSNs with an explicit error
+// until PostgreSQL implementations are available (tracked in HARN-73).
 package storage
 
 import (

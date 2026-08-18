@@ -21,8 +21,11 @@ CREATE TABLE IF NOT EXISTS metabolism_jobs_new (
 );
 
 -- Step 2: Copy existing data.
-INSERT OR IGNORE INTO metabolism_jobs_new
-    SELECT * FROM metabolism_jobs;
+-- ON CONFLICT DO NOTHING is standard SQL supported by both SQLite 3.24+ and
+-- PostgreSQL, replacing the SQLite-only INSERT OR IGNORE form.
+INSERT INTO metabolism_jobs_new
+    SELECT * FROM metabolism_jobs
+    ON CONFLICT DO NOTHING;
 
 -- Step 3: Drop old table and rename.
 DROP TABLE IF EXISTS metabolism_jobs;
