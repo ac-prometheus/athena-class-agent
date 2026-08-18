@@ -359,9 +359,10 @@ type MetabolismJobStore interface {
 	// BEFORE dispatching the processing goroutine. Returns the job ID.
 	Commit(ctx context.Context, sessionID, jobType string) (jobID string, err error)
 
-	// Claim atomically transitions a pending job to running.
-	// Returns ErrJobNotPending if already claimed.
-	Claim(ctx context.Context, jobID string) error
+	// Claim atomically transitions a pending or stale-running job to running.
+	// A running job is considered stale if started_at is older than staleDuration.
+	// Returns ErrJobNotPending if the job cannot be claimed.
+	Claim(ctx context.Context, jobID string, staleDuration time.Duration) error
 
 	// Complete marks a job as successfully finished.
 	Complete(ctx context.Context, jobID string) error

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
@@ -32,12 +33,16 @@ func (s *SQLiteJobStore) Commit(ctx context.Context, sessionID, jobType string) 
 	return id, nil
 }
 
-func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string) error {
+func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string, staleDuration time.Duration) error {
+	staleThreshold := fmt.Sprintf("-%d seconds", int(staleDuration.Seconds()))
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
 		 SET status = 'running', started_at = CURRENT_TIMESTAMP
-		 WHERE id = ? AND status = 'pending'`,
-		jobID,
+		 WHERE id = ? AND (
+		     status = 'pending' OR
+		     (status = 'running' AND started_at < datetime('now', ?))
+		 )`,
+		jobID, staleThreshold,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: claiming job %s: %w", jobID, err)
@@ -95,7 +100,7 @@ func (s *SQLiteJobStore) Recoverable(ctx context.Context, maxRetries int) ([]pkg
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, session_id, retry_count
 		 FROM metabolism_jobs
-		 WHERE status IN ('pending', 'running') AND retry_count < ?
+		 WHERE status IN ('pending', 'running', 'failed') AND retry_count < ?
 		 ORDER BY created_at ASC`,
 		maxRetries,
 	)

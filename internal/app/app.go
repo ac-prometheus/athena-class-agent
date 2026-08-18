@@ -178,17 +178,9 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 
 	if deps.DB != nil {
 		d.WithDB(deps.DB, driverName)
-		if deps.JobStore != nil {
-			d.WithJobStore(deps.JobStore)
-		}
 	}
-	if jobRunner != nil {
-		// Wire the pipeline into the daemon for crash-recovery dispatch.
-		// The pipeline variable is internal to NewApp; daemon.WithMetabolism
-		// takes the Pipeline directly. We can't pass pipeline from the closure
-		// once jobRunner is constructed, so we use WithJobStore (already called
-		// above) and daemon will use the store-based recovery path.
-		// TODO: expose pipeline from jobRunner or store it on App for full recovery wiring.
+	if supervisor != nil {
+		d.WithSupervisor(supervisor)
 	}
 
 	return &App{

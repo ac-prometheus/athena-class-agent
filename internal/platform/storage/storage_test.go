@@ -169,7 +169,7 @@ func TestJobStore_CommitClaimComplete(t *testing.T) {
 	}
 
 	// Claim.
-	if err := store.Claim(ctx, jobID); err != nil {
+	if err := store.Claim(ctx, jobID, 5*time.Minute); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 	if err := raw.QueryRow("SELECT status FROM metabolism_jobs WHERE id = ?", jobID).Scan(&status); err != nil {
@@ -261,11 +261,11 @@ func TestJobStore_DoubleClaimReturnsErrJobNotPending(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	if err := store.Claim(ctx, jobID); err != nil {
+	if err := store.Claim(ctx, jobID, 5*time.Minute); err != nil {
 		t.Fatalf("first Claim: %v", err)
 	}
 
-	err = store.Claim(ctx, jobID)
+	err = store.Claim(ctx, jobID, 5*time.Minute)
 	if !errors.Is(err, pkg.ErrJobNotPending) {
 		t.Errorf("second Claim = %v, want ErrJobNotPending", err)
 	}
@@ -287,7 +287,7 @@ func TestJobStore_Recoverable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit 2: %v", err)
 	}
-	if err := store.Claim(ctx, id2); err != nil {
+	if err := store.Claim(ctx, id2, 5*time.Minute); err != nil {
 		t.Fatalf("Claim 2: %v", err)
 	}
 
@@ -296,7 +296,7 @@ func TestJobStore_Recoverable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit 3: %v", err)
 	}
-	if err := store.Claim(ctx, id3); err != nil {
+	if err := store.Claim(ctx, id3, 5*time.Minute); err != nil {
 		t.Fatalf("Claim 3: %v", err)
 	}
 	if err := store.Complete(ctx, id3); err != nil {

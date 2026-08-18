@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
@@ -63,7 +64,7 @@ func (r *JobRunner) Submit(ctx context.Context, sessionID, jobType string) error
 // Both Submit (new work) and RecoverStalled (crash recovery) funnel
 // through this method, so the state machine lives in exactly one place.
 func (r *JobRunner) Run(ctx context.Context, jobID, sessionID string) error {
-	if err := r.store.Claim(ctx, jobID); err != nil {
+	if err := r.store.Claim(ctx, jobID, 5*time.Minute); err != nil {
 		if errors.Is(err, pkg.ErrJobNotPending) {
 			r.logger.Info("jobrunner: job already claimed — skipping",
 				"job_id", jobID, "session_id", sessionID)

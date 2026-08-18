@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
 	"github.com/ac-prometheus/athena-class-agent/internal/metabolism"
@@ -21,9 +22,7 @@ type Daemon struct {
 	waker      *WakeScheduler
 	db         platform.DB // optional; enables checkpoint scan on startup
 	driverName string      // "sqlite3" or "postgres"
-	pipeline   *metabolism.Pipeline
-	maxRetries int // max retries for metabolism job recovery (default 3)
-	jobStore   pkg.MetabolismJobStore // nil = fall back to raw DB recovery
+	supervisor *metabolism.Supervisor // bounded-concurrency recovery and drain
 }
 
 // sessionRunner is the minimal interface the daemon needs from assembly.
@@ -55,16 +54,10 @@ func (d *Daemon) WithDB(db platform.DB, driverName string) {
 	d.driverName = driverName
 }
 
-// WithJobStore attaches a MetabolismJobStore for store-based recovery at startup.
-// When set, recoverMetabolismJobs uses Recoverable() instead of raw SQL.
-func (d *Daemon) WithJobStore(js pkg.MetabolismJobStore) {
-	d.jobStore = js
-}
-
-// WithMetabolism attaches a metabolism pipeline for processing recovered jobs.
-func (d *Daemon) WithMetabolism(pipeline *metabolism.Pipeline, maxRetries int) {
-	d.pipeline = pipeline
-	d.maxRetries = maxRetries
+// WithSupervisor attaches a metabolism Supervisor for bounded-concurrency
+// recovery at startup and graceful drain on shutdown.
+func (d *Daemon) WithSupervisor(s *metabolism.Supervisor) {
+	d.supervisor = s
 }
 
 // WithChannels attaches a channel registry, Aegis gateway, and wake scheduler.
@@ -92,13 +85,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	if d.registry == nil || len(d.registry.List()) == 0 {
 		slog.Info("daemon: no channels configured — running one-shot session")
-		return d.runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "daemon-startup", InbandNotes: startupNotes})
+		err := d.runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "daemon-startup", InbandNotes: startupNotes})
+		d.drainSupervisor()
+		return err
 	}
 
 	events, err := d.registry.StartAll(ctx)
 	if err != nil {
 		slog.Warn("daemon: channel startup error, falling back to one-shot", "err", err)
-		return d.runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "daemon-startup", InbandNotes: startupNotes})
+		err := d.runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "daemon-startup", InbandNotes: startupNotes})
+		d.drainSupervisor()
+		return err
 	}
 
 	slog.Info("daemon: event loop started", "channels", len(d.registry.List()))
@@ -108,11 +105,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			slog.Info("daemon: context cancelled, shutting down")
+			d.drainSupervisor()
 			return ctx.Err()
 
 		case ev, ok := <-events:
 			if !ok {
 				slog.Info("daemon: all channels closed")
+				d.drainSupervisor()
 				return nil
 			}
 			var notes []string
@@ -122,6 +121,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 			}
 			d.handleEvent(ctx, ev, notes)
 		}
+	}
+}
+
+func (d *Daemon) drainSupervisor() {
+	if d.supervisor == nil {
+		return
+	}
+	if err := d.supervisor.Drain(10 * time.Second); err != nil {
+		slog.Warn("daemon: supervisor drain timeout", "err", err)
 	}
 }
 
@@ -144,68 +152,19 @@ func (d *Daemon) scanInterruptedSessions(ctx context.Context) []string {
 }
 
 // recoverMetabolismJobs scans for incomplete metabolism jobs at startup and
-// re-dispatches each through ProcessSession in a background goroutine.
-// Prefers MetabolismJobStore.Recoverable; falls back to raw DB recovery.
+// re-dispatches each through the Supervisor's bounded recovery path.
 func (d *Daemon) recoverMetabolismJobs(ctx context.Context) {
-	if d.pipeline == nil {
+	if d.supervisor == nil {
+		slog.Info("daemon: no supervisor — skipping metabolism recovery")
 		return
 	}
-
-	maxRetries := d.maxRetries
-	if maxRetries <= 0 {
-		maxRetries = 3
-	}
-
-	// Store-based recovery path.
-	if d.jobStore != nil {
-		recoverable, err := d.jobStore.Recoverable(ctx, maxRetries)
-		if err != nil {
-			slog.Warn("daemon: metabolism recovery scan (store) failed", "err", err)
-			return
-		}
-		if len(recoverable) == 0 {
-			return
-		}
-		slog.Info("daemon: recovering incomplete metabolism jobs (store)", "count", len(recoverable))
-		for _, rj := range recoverable {
-			rj := rj
-			go func() {
-				slog.Info("daemon: re-dispatching metabolism job",
-					"job_id", rj.JobID, "session_id", rj.SessionID)
-				if err := d.pipeline.ProcessSession(ctx, rj.SessionID); err != nil {
-					slog.Error("daemon: metabolism re-dispatch failed",
-						"job_id", rj.JobID, "session_id", rj.SessionID, "err", err)
-				}
-			}()
-		}
-		return
-	}
-
-	// Legacy raw DB recovery path.
-	if d.db == nil {
-		return
-	}
-
-	jobs, err := metabolism.RecoverIncompleteJobs(ctx, d.db, d.driverName, maxRetries)
+	n, err := d.supervisor.Recover(ctx, 3)
 	if err != nil {
-		slog.Warn("daemon: metabolism recovery scan failed", "err", err)
+		slog.Warn("daemon: metabolism recovery failed", "err", err)
 		return
 	}
-	if len(jobs) == 0 {
-		return
-	}
-
-	slog.Info("daemon: recovering incomplete metabolism jobs", "count", len(jobs))
-	for _, job := range jobs {
-		job := job
-		go func() {
-			slog.Info("daemon: re-dispatching metabolism job",
-				"job_id", job.ID, "session_id", job.SessionID)
-			if err := d.pipeline.ProcessSession(ctx, job.SessionID); err != nil {
-				slog.Error("daemon: metabolism re-dispatch failed",
-					"job_id", job.ID, "session_id", job.SessionID, "err", err)
-			}
-		}()
+	if n > 0 {
+		slog.Info("daemon: recovered metabolism jobs via supervisor", "count", n)
 	}
 }
 
