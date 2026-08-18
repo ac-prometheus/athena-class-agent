@@ -33,7 +33,7 @@ type Daemon struct {
 // running session so SIGINT/SIGTERM terminates cleanly rather than
 // waiting for the session to finish on its own schedule.
 type sessionRunner interface {
-	RunSession(ctx context.Context, wakeReason string, inbandNotes []string) error
+	RunSession(ctx context.Context, trigger pkg.SessionTrigger) error
 }
 
 // Config holds daemon-level configuration.
@@ -92,13 +92,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	if d.registry == nil || len(d.registry.List()) == 0 {
 		slog.Info("daemon: no channels configured — running one-shot session")
-		return d.runner.RunSession(ctx, "daemon-startup", startupNotes)
+		return d.runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "daemon-startup", InbandNotes: startupNotes})
 	}
 
 	events, err := d.registry.StartAll(ctx)
 	if err != nil {
 		slog.Warn("daemon: channel startup error, falling back to one-shot", "err", err)
-		return d.runner.RunSession(ctx, "daemon-startup", startupNotes)
+		return d.runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "daemon-startup", InbandNotes: startupNotes})
 	}
 
 	slog.Info("daemon: event loop started", "channels", len(d.registry.List()))
@@ -236,7 +236,14 @@ func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent, inba
 	wakeReason := "channel:" + ev.Channel
 	slog.Info("daemon: wake condition met", "reason", wakeReason, "sender", ev.SenderName)
 
-	if err := d.runner.RunSession(ctx, wakeReason, inbandNotes); err != nil {
+	trigger := pkg.SessionTrigger{
+		WakeReason:     wakeReason,
+		InboundContent: string(annotated.Normalized),
+		InboundSender:  ev.SenderName,
+		InboundChannel: ev.Channel,
+		InbandNotes:    inbandNotes,
+	}
+	if err := d.runner.RunSession(ctx, trigger); err != nil {
 		slog.Error("daemon: session error", "err", err)
 	}
 }

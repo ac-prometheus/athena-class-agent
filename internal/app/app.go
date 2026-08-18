@@ -213,5 +213,5 @@ func (a *App) Run(ctx context.Context) error {
 //
 // Both SessionRunner and Phase1Runner satisfy this interface.
 type SessionRunnerIface interface {
-	RunSession(ctx context.Context, wakeReason string, inbandNotes []string) error
+	RunSession(ctx context.Context, trigger pkg.SessionTrigger) error
 }

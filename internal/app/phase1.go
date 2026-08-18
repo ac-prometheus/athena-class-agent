@@ -25,15 +25,15 @@ func NewPhase1Runner(deps *Dependencies, assembler *assembly.ContextAssembler) *
 
 // RunSession executes a single connectivity-test turn.
 // ctx is propagated from the daemon so external cancellation terminates cleanly.
-func (r *Phase1Runner) RunSession(ctx context.Context, wakeReason string, inbandNotes []string) error {
+func (r *Phase1Runner) RunSession(ctx context.Context, trigger pkg.SessionTrigger) error {
 	cfg := assembly.MinimalAssembleConfig()
-	cfg.InbandNotes = inbandNotes
+	cfg.InbandNotes = trigger.InbandNotes
 	assembled, err := r.assembler.Assemble(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("assembling context: %w", err)
 	}
 
-	sess := session.NewSession(r.deps.Config.AgentName, wakeReason, nil)
+	sess := session.NewSession(r.deps.Config.AgentName, trigger.WakeReason, nil)
 	budget := assembly.NewTokenBudget(r.deps.Config.TokenBudget, r.deps.Config.HardFloorTokens)
 	hooks := engine.NewHookPipeline()
 

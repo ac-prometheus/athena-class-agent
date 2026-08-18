@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
@@ -51,7 +52,12 @@ func (r *SessionRunner) WithSupervisor(s *metabolism.Supervisor) *SessionRunner 
 //
 // ctx is the daemon's context — cancellation propagates into the engine loop
 // so external signals (SIGINT, test deadlines) can terminate sessions cleanly.
-func (r *SessionRunner) RunSession(ctx context.Context, wakeReason string, inbandNotes []string) error {
+// trigger carries the wake reason and any inbound event content; when
+// InboundContent is non-empty the content is routed as the engine's initial
+// user message so the agent can respond to the triggering event.
+func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigger) error {
+	wakeReason := trigger.WakeReason
+	inbandNotes := trigger.InbandNotes
 
 	// 1. Read policy from workspace file. Missing file is not an error — use defaults.
 	policyReader := session.NewPolicyReader(r.deps.Config.WorkspaceDir, r.deps.DB)
@@ -189,10 +195,28 @@ func (r *SessionRunner) RunSession(ctx context.Context, wakeReason string, inban
 		eng.WithAegis(r.deps.Gateway)
 	}
 
+	// Build the initial user message. When the session was triggered by an
+	// inbound channel event, route the content so the agent can respond to it
+	// directly rather than treating every wake as a generic heartbeat.
+	initialContent := "[session start]"
+	if trigger.InboundContent != "" {
+		var header strings.Builder
+		header.WriteString("[inbound event]")
+		if trigger.InboundSender != "" {
+			header.WriteString("\nfrom: ")
+			header.WriteString(trigger.InboundSender)
+		}
+		if trigger.InboundChannel != "" {
+			header.WriteString("\nchannel: ")
+			header.WriteString(trigger.InboundChannel)
+		}
+		initialContent = header.String() + "\n\n" + trigger.InboundContent
+	}
+
 	req := pkg.CompletionRequest{
 		System: assembled.SystemPrompt,
 		Messages: []pkg.Message{
-			{Role: "user", Content: "[session start]"},
+			{Role: "user", Content: initialContent},
 		},
 		MaxTokens: 4096,
 	}

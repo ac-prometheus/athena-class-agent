@@ -27,10 +27,32 @@ func (s *SQLiteStore) AppendExperiential(ctx context.Context, entry pkg.Experien
 	return err
 }
 
-// SearchNarrative returns a stub empty slice.
-// Full vector search is handled by the VectorIndex layer (sqlite-vec).
-func (s *SQLiteStore) SearchNarrative(_ context.Context, _ []float32, _ int) ([]pkg.NarrativeSummary, error) {
-	return nil, nil
+// SearchNarrative returns T3 narrative summaries ordered by recency.
+// When embedding is non-nil, vector similarity search is handled by the
+// VectorIndex layer (sqlite-vec); this method provides the recency-first
+// fallback that surfaces committed narratives during context assembly.
+func (s *SQLiteStore) SearchNarrative(ctx context.Context, _ []float32, limit int) ([]pkg.NarrativeSummary, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT id, session_id, content, belief_meta
+		 FROM narrative_summaries
+		 ORDER BY created_at DESC LIMIT ?`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []pkg.NarrativeSummary
+	for rows.Next() {
+		var n pkg.NarrativeSummary
+		var metaJSON string
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Content, &metaJSON); err != nil {
+			return nil, err
+		}
+		n.Belief = decodeBelief(metaJSON, nil)
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 // InsertNarrative inserts a T3 narrative summary.
@@ -243,10 +265,32 @@ func (p *PostgresStore) AppendExperiential(ctx context.Context, entry pkg.Experi
 	return err
 }
 
-// SearchNarrative returns a stub empty slice.
-// Full vector search is handled by the pgvector VectorIndex implementation.
-func (p *PostgresStore) SearchNarrative(_ context.Context, _ []float32, _ int) ([]pkg.NarrativeSummary, error) {
-	return nil, nil
+// SearchNarrative returns T3 narrative summaries ordered by recency.
+// When embedding is non-nil, vector similarity search is handled by the
+// pgvector VectorIndex layer; this method provides the recency-first fallback
+// that surfaces committed narratives during context assembly.
+func (p *PostgresStore) SearchNarrative(ctx context.Context, _ []float32, limit int) ([]pkg.NarrativeSummary, error) {
+	rows, err := p.pool.Query(ctx,
+		`SELECT id, session_id, content, belief_meta::text
+		 FROM narrative_summaries
+		 ORDER BY created_at DESC LIMIT $1`, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []pkg.NarrativeSummary
+	for rows.Next() {
+		var n pkg.NarrativeSummary
+		var metaJSON string
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Content, &metaJSON); err != nil {
+			return nil, err
+		}
+		n.Belief = decodeBelief(metaJSON, nil)
+		out = append(out, n)
+	}
+	return out, rows.Err()
 }
 
 // InsertNarrative inserts a T3 narrative summary.

@@ -268,7 +268,7 @@ func TestAcceptance_OrdinaryEpisodicReturn(t *testing.T) {
 	deps := acceptanceDeps(t, pdb)
 	runner := acceptanceRunner(t, deps)
 
-	err := runner.RunSession(context.Background(), "heartbeat", nil)
+	err := runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
 	if err != nil {
 		t.Fatalf("RunSession: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestAcceptance_ConfigurationChangeDisclosure(t *testing.T) {
 		t.Fatalf("write lifecycle.json: %v", err)
 	}
 
-	err := runner.RunSession(context.Background(), "heartbeat", nil)
+	err := runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
 	if err != nil {
 		t.Fatalf("RunSession: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestAcceptance_InvalidConfigurationFallback(t *testing.T) {
 		t.Fatalf("write lifecycle.json: %v", err)
 	}
 
-	err := runner.RunSession(context.Background(), "heartbeat", nil)
+	err := runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
 	if err != nil {
 		t.Fatalf("RunSession should succeed on invalid policy (falls back): %v", err)
 	}
