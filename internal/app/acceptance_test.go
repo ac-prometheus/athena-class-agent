@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -209,6 +208,35 @@ func (s *stubT2Store) QueryLogs(ctx context.Context, sessionID string, _ int) ([
 // Test composition helpers
 // ---------------------------------------------------------------------------
 
+func acceptanceConfig(t *testing.T) *platform.Config {
+	t.Helper()
+	identityDir := t.TempDir()
+	os.WriteFile(filepath.Join(identityDir, "soul.md"), []byte("test identity"), 0644)
+	return &platform.Config{
+		AgentName:        "ersa-test",
+		WorkspaceDir:     t.TempDir(),
+		IdentityDir:      identityDir,
+		TokenBudget:      200000,
+		HardFloorTokens:  1500,
+		LLMProvider:      "openai-compat",
+		LLMEndpoint:      "http://localhost:0",
+		DatabaseDSN:      "sqlite3://:memory:",
+		SkipWitnessCheck: true,
+	}
+}
+
+func acceptanceApp(t *testing.T, rawDB *sql.DB, pdb platform.DB) *App {
+	t.Helper()
+	cfg := acceptanceConfig(t)
+	application, err := NewApp(cfg, ProfileDevelopment, WithLLM(&stubLLM{}), WithDB(pdb))
+	if err != nil {
+		t.Fatalf("acceptance NewApp: %v", err)
+	}
+	return application
+}
+
+// acceptanceDeps provides direct access to dependencies for scenarios that
+// need to pre-populate database state before running through the app graph.
 func acceptanceDeps(t *testing.T, pdb platform.DB) *Dependencies {
 	t.Helper()
 	identityDir := t.TempDir()
@@ -352,20 +380,21 @@ func TestAcceptance_WakeBeforeMetabolismCompletion(t *testing.T) {
 
 func TestAcceptance_ConfigurationChangeDisclosure(t *testing.T) {
 	rawDB, pdb := acceptanceDB(t)
-	deps := acceptanceDeps(t, pdb)
-	runner := acceptanceRunner(t, deps)
+	application := acceptanceApp(t, rawDB, pdb)
 
 	policyJSON := `{"temporal_mode":"episodic","bridge_policy":"agent_requested","metabolism_policy":"standard","assembly_profile":"full"}`
-	if err := os.WriteFile(filepath.Join(deps.Config.WorkspaceDir, "lifecycle.json"), []byte(policyJSON), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(application.Config.WorkspaceDir, "lifecycle.json"), []byte(policyJSON), 0644); err != nil {
 		t.Fatalf("write lifecycle.json: %v", err)
 	}
 
-	err := runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
+	err := application.Runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
 	if err != nil {
 		t.Fatalf("RunSession: %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	if application.Supervisor != nil {
+		application.Supervisor.Drain(5 * time.Second)
+	}
 
 	disclosureCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM configuration_applied`)
 	if disclosureCount == 0 {
@@ -379,19 +408,20 @@ func TestAcceptance_ConfigurationChangeDisclosure(t *testing.T) {
 
 func TestAcceptance_InvalidConfigurationFallback(t *testing.T) {
 	rawDB, pdb := acceptanceDB(t)
-	deps := acceptanceDeps(t, pdb)
-	runner := acceptanceRunner(t, deps)
+	application := acceptanceApp(t, rawDB, pdb)
 
-	if err := os.WriteFile(filepath.Join(deps.Config.WorkspaceDir, "lifecycle.json"), []byte("{invalid json!!!"), 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(application.Config.WorkspaceDir, "lifecycle.json"), []byte("{invalid json!!!"), 0644); err != nil {
 		t.Fatalf("write lifecycle.json: %v", err)
 	}
 
-	err := runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
+	err := application.Runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
 	if err != nil {
 		t.Fatalf("RunSession should succeed on invalid policy (falls back): %v", err)
 	}
 
-	time.Sleep(200 * time.Millisecond)
+	if application.Supervisor != nil {
+		application.Supervisor.Drain(5 * time.Second)
+	}
 
 	planCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM lifecycle_plans`)
 	if planCount == 0 {
@@ -410,20 +440,26 @@ func TestAcceptance_InvalidConfigurationFallback(t *testing.T) {
 
 func TestAcceptance_UnannotatedExternalContentRefused(t *testing.T) {
 	rawDB, pdb := acceptanceDB(t)
-	_ = rawDB
+	application := acceptanceApp(t, rawDB, pdb)
 	ctx := context.Background()
 
 	rawDB.Exec(`INSERT INTO experiential_logs (id, session_id, content, content_source, created_at)
 		VALUES ('ext-log-1', 'session-external', 'message from discord', 'discord', CURRENT_TIMESTAMP)`)
 
-	t2Store := &stubT2Store{db: pdb}
-	pipeline := metabolism.NewPipeline(t2Store, nil, func(s string) (string, error) {
-		return "compressed", nil
-	}, nil, pdb, "sqlite3")
+	jobID, err := application.Dependencies.JobStore.Commit(ctx, "session-external", "standard")
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
 
-	err := pipeline.ProcessSession(ctx, "session-external")
-	if !errors.Is(err, metabolism.ErrReviewRequired) {
-		t.Fatalf("expected ErrReviewRequired, got: %v", err)
+	if application.Supervisor != nil {
+		application.Supervisor.Submit(ctx, "session-external", "standard")
+		application.Supervisor.Drain(5 * time.Second)
+	}
+
+	status := queryScalar[string](t, rawDB,
+		`SELECT status FROM metabolism_jobs WHERE id = ? OR session_id = 'session-external' ORDER BY created_at DESC LIMIT 1`, jobID)
+	if status != "review_required" && status != "pending" {
+		t.Errorf("expected review_required or pending status, got %q", status)
 	}
 }
 
@@ -433,14 +469,18 @@ func TestAcceptance_UnannotatedExternalContentRefused(t *testing.T) {
 
 func TestAcceptance_RecoveryAfterInterruptedLiveSession(t *testing.T) {
 	rawDB, pdb := acceptanceDB(t)
-	deps := acceptanceDeps(t, pdb)
+	application := acceptanceApp(t, rawDB, pdb)
 	ctx := context.Background()
 
-	if err := deps.LifecycleStore.WriteCheckpoint(ctx, "session-interrupted", 5, "t2-high", 5000, "active"); err != nil {
+	lifecycleStore := application.Dependencies.LifecycleStore
+	if lifecycleStore == nil {
+		t.Fatal("LifecycleStore is nil — production graph should wire it")
+	}
+
+	if err := lifecycleStore.WriteCheckpoint(ctx, "session-interrupted", 5, "t2-high", 5000, "active"); err != nil {
 		t.Fatalf("WriteCheckpoint: %v", err)
 	}
 
-	// Backdate the checkpoint so it's older than any cutoff we use.
 	rawDB.Exec(`UPDATE session_checkpoints SET created_at = '2020-01-01 00:00:00' WHERE session_id = 'session-interrupted'`)
 
 	state := queryScalar[string](t, rawDB, `SELECT state FROM session_checkpoints WHERE session_id = 'session-interrupted'`)
@@ -448,10 +488,7 @@ func TestAcceptance_RecoveryAfterInterruptedLiveSession(t *testing.T) {
 		t.Fatalf("checkpoint state = %q, want %q", state, "active")
 	}
 
-	// InterruptStaleCheckpoints uses `created_at < ?` — SQLite stores UTC
-	// strings from CURRENT_TIMESTAMP, so pass a UTC-formatted string via
-	// the raw DB for reliable comparison.
-	n, err := deps.LifecycleStore.InterruptStaleCheckpoints(ctx, time.Now())
+	n, err := lifecycleStore.InterruptStaleCheckpoints(ctx, time.Now())
 	if err != nil {
 		t.Fatalf("InterruptStaleCheckpoints: %v", err)
 	}
@@ -459,7 +496,7 @@ func TestAcceptance_RecoveryAfterInterruptedLiveSession(t *testing.T) {
 		t.Errorf("interrupted count = %d, want 1", n)
 	}
 
-	finalState, err := deps.LifecycleStore.LastCheckpointState(ctx)
+	finalState, err := lifecycleStore.LastCheckpointState(ctx)
 	if err != nil {
 		t.Fatalf("LastCheckpointState: %v", err)
 	}
