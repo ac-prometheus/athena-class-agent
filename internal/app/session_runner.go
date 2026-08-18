@@ -17,10 +17,11 @@ import (
 // SessionRunner implements daemon.SessionRunner with full lifecycle resolution,
 // context assembly, engine loop, and end-of-session metabolism dispatch.
 type SessionRunner struct {
-	deps      *Dependencies
-	assembler *assembly.ContextAssembler
-	jobRunner *metabolism.JobRunner // nil when metabolism not wired
-	logger    *slog.Logger
+	deps       *Dependencies
+	assembler  *assembly.ContextAssembler
+	jobRunner  *metabolism.JobRunner  // nil when metabolism not wired
+	supervisor *metabolism.Supervisor // preferred over jobRunner when set (bounded concurrency)
+	logger     *slog.Logger
 }
 
 // NewSessionRunner creates a lifecycle session runner. The jobRunner may be nil
@@ -37,10 +38,20 @@ func NewSessionRunner(deps *Dependencies, assembler *assembly.ContextAssembler, 
 	}
 }
 
+// WithSupervisor attaches a Supervisor for bounded-concurrency dispatch.
+// When set, metabolism jobs are submitted through the supervisor instead of
+// the job runner directly, providing concurrency control and graceful drain.
+func (r *SessionRunner) WithSupervisor(s *metabolism.Supervisor) *SessionRunner {
+	r.supervisor = s
+	return r
+}
+
 // RunSession executes a full agent session: resolve lifecycle plan → assemble
 // context → run engine loop → end session → dispatch metabolism.
-func (r *SessionRunner) RunSession(wakeReason string, inbandNotes []string) error {
-	ctx := context.Background()
+//
+// ctx is the daemon's context — cancellation propagates into the engine loop
+// so external signals (SIGINT, test deadlines) can terminate sessions cleanly.
+func (r *SessionRunner) RunSession(ctx context.Context, wakeReason string, inbandNotes []string) error {
 
 	// 1. Read policy from workspace file. Missing file is not an error — use defaults.
 	policyReader := session.NewPolicyReader(r.deps.Config.WorkspaceDir, r.deps.DB)
@@ -208,8 +219,14 @@ func (r *SessionRunner) RunSession(wakeReason string, inbandNotes []string) erro
 		return fmt.Errorf("lifecycle: session end: %w", err)
 	}
 
-	// 12. Dispatch metabolism via JobRunner when available.
-	if r.jobRunner != nil {
+	// 12. Dispatch metabolism via Supervisor (preferred for concurrency control),
+	// falling back to JobRunner or direct store commit when unavailable.
+	if r.supervisor != nil {
+		if err := r.supervisor.Submit(ctx, sess.GetID(), "standard"); err != nil {
+			r.logger.Warn("lifecycle: metabolism supervisor submit failed — skipping pipeline",
+				"session", sess.GetID(), "err", err)
+		}
+	} else if r.jobRunner != nil {
 		if err := r.jobRunner.Submit(ctx, sess.GetID(), "standard"); err != nil {
 			r.logger.Warn("lifecycle: metabolism submit failed — skipping pipeline",
 				"session", sess.GetID(), "err", err)

@@ -28,8 +28,12 @@ type Daemon struct {
 
 // sessionRunner is the minimal interface the daemon needs from assembly.
 // Keeps daemon from importing assembly directly in Phase 1.
+//
+// ctx is the daemon's own context — cancellation propagates into the
+// running session so SIGINT/SIGTERM terminates cleanly rather than
+// waiting for the session to finish on its own schedule.
 type sessionRunner interface {
-	RunSession(wakeReason string, inbandNotes []string) error
+	RunSession(ctx context.Context, wakeReason string, inbandNotes []string) error
 }
 
 // Config holds daemon-level configuration.
@@ -88,13 +92,13 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 	if d.registry == nil || len(d.registry.List()) == 0 {
 		slog.Info("daemon: no channels configured — running one-shot session")
-		return d.runner.RunSession("daemon-startup", startupNotes)
+		return d.runner.RunSession(ctx, "daemon-startup", startupNotes)
 	}
 
 	events, err := d.registry.StartAll(ctx)
 	if err != nil {
 		slog.Warn("daemon: channel startup error, falling back to one-shot", "err", err)
-		return d.runner.RunSession("daemon-startup", startupNotes)
+		return d.runner.RunSession(ctx, "daemon-startup", startupNotes)
 	}
 
 	slog.Info("daemon: event loop started", "channels", len(d.registry.List()))
@@ -232,7 +236,7 @@ func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent, inba
 	wakeReason := "channel:" + ev.Channel
 	slog.Info("daemon: wake condition met", "reason", wakeReason, "sender", ev.SenderName)
 
-	if err := d.runner.RunSession(wakeReason, inbandNotes); err != nil {
+	if err := d.runner.RunSession(ctx, wakeReason, inbandNotes); err != nil {
 		slog.Error("daemon: session error", "err", err)
 	}
 }

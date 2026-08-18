@@ -24,10 +24,11 @@ func NewPhase1Runner(deps *Dependencies, assembler *assembly.ContextAssembler) *
 }
 
 // RunSession executes a single connectivity-test turn.
-func (r *Phase1Runner) RunSession(wakeReason string, inbandNotes []string) error {
+// ctx is propagated from the daemon so external cancellation terminates cleanly.
+func (r *Phase1Runner) RunSession(ctx context.Context, wakeReason string, inbandNotes []string) error {
 	cfg := assembly.MinimalAssembleConfig()
 	cfg.InbandNotes = inbandNotes
-	assembled, err := r.assembler.Assemble(context.Background(), cfg)
+	assembled, err := r.assembler.Assemble(ctx, cfg)
 	if err != nil {
 		return fmt.Errorf("assembling context: %w", err)
 	}
@@ -49,7 +50,6 @@ func (r *Phase1Runner) RunSession(wakeReason string, inbandNotes []string) error
 		MaxTokens: 256,
 	}
 
-	ctx := context.Background()
 	turn, err := loop.RunOneTurn(ctx, req)
 	if err != nil {
 		return fmt.Errorf("running turn: %w", err)
