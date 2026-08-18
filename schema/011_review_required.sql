@@ -21,11 +21,10 @@ CREATE TABLE IF NOT EXISTS metabolism_jobs_new (
 );
 
 -- Step 2: Copy existing data.
--- ON CONFLICT DO NOTHING is standard SQL supported by both SQLite 3.24+ and
--- PostgreSQL, replacing the SQLite-only INSERT OR IGNORE form.
-INSERT INTO metabolism_jobs_new
-    SELECT * FROM metabolism_jobs
-    ON CONFLICT DO NOTHING;
+-- INSERT OR IGNORE is SQLite's syntax for INSERT-SELECT with conflict handling.
+-- ON CONFLICT DO NOTHING only works with INSERT VALUES in SQLite, not INSERT SELECT.
+INSERT OR IGNORE INTO metabolism_jobs_new
+    SELECT * FROM metabolism_jobs;
 
 -- Step 3: Drop old table and rename.
 DROP TABLE IF EXISTS metabolism_jobs;
