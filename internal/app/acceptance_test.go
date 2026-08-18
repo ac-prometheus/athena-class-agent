@@ -451,20 +451,19 @@ func TestAcceptance_UnannotatedExternalContentRefused(t *testing.T) {
 	rawDB.Exec(`INSERT INTO experiential_logs (id, session_id, content, content_source, created_at)
 		VALUES ('ext-log-1', 'session-external', 'message from discord', 'discord', CURRENT_TIMESTAMP)`)
 
-	jobID, err := application.Dependencies.JobStore.Commit(ctx, "session-external", "standard")
-	if err != nil {
-		t.Fatalf("Commit: %v", err)
+	if application.Supervisor == nil {
+		t.Fatal("Supervisor is nil — production graph should wire it")
 	}
 
-	if application.Supervisor != nil {
-		application.Supervisor.Submit(ctx, "session-external", "standard")
-		application.Supervisor.Drain(5 * time.Second)
+	if err := application.Supervisor.Submit(ctx, "session-external", "standard"); err != nil {
+		t.Fatalf("Supervisor.Submit: %v", err)
 	}
+	application.Supervisor.Drain(5 * time.Second)
 
 	status := queryScalar[string](t, rawDB,
-		`SELECT status FROM metabolism_jobs WHERE id = ? OR session_id = 'session-external' ORDER BY created_at DESC LIMIT 1`, jobID)
-	if status != "review_required" && status != "pending" {
-		t.Errorf("expected review_required or pending status, got %q", status)
+		`SELECT status FROM metabolism_jobs WHERE session_id = 'session-external' ORDER BY created_at DESC LIMIT 1`)
+	if status != "review_required" && status != "failed" {
+		t.Errorf("expected review_required or failed status for unannotated external content, got %q", status)
 	}
 }
 

@@ -37,9 +37,10 @@ func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string, staleDuration 
 	staleThreshold := fmt.Sprintf("-%d seconds", int(staleDuration.Seconds()))
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
-		 SET status = 'running', started_at = CURRENT_TIMESTAMP
+		 SET status = 'running', started_at = CURRENT_TIMESTAMP, retry_count = retry_count + 1
 		 WHERE id = ? AND (
 		     status = 'pending' OR
+		     status = 'failed' OR
 		     (status = 'running' AND started_at < datetime('now', ?))
 		 )`,
 		jobID, staleThreshold,
