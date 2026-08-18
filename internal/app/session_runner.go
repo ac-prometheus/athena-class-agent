@@ -80,12 +80,15 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 	}
 
 	// 2. Check for policy change and produce a disclosure note if changed.
+	// Disclosure is recorded after session creation (step 7b) so it gets the real session ID.
 	var disclosureNote string
+	var prevHash string
 	if policyHash != "" {
-		changed, prevHash, changeErr := policyReader.HasChanged(ctx, policyHash)
+		changed, ph, changeErr := policyReader.HasChanged(ctx, policyHash)
 		if changeErr != nil {
 			r.logger.Warn("lifecycle: policy change check failed", "err", changeErr)
 		} else if changed {
+			prevHash = ph
 			oldPolicy := queryLastPolicy(ctx, r.deps.DB)
 			disclosure := session.GenerateDisclosure(oldPolicy, &policy)
 			disclosure.PolicyPath = policyReader.PolicyPath()
@@ -94,12 +97,6 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 			disclosureNote = disclosure.ForContext()
 			r.logger.Info("lifecycle: policy change detected",
 				"new_hash", policyHash, "prev_hash", prevHash)
-
-			if r.deps.LifecycleStore != nil {
-				if dErr := r.deps.LifecycleStore.RecordDisclosure(ctx, "", policyReader.PolicyPath(), policyHash, prevHash, disclosureNote); dErr != nil {
-					r.logger.Warn("lifecycle: RecordDisclosure failed", "err", dErr)
-				}
-			}
 		}
 	}
 
@@ -148,13 +145,20 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 	// 7. Backfill SessionID into plan.
 	plan.SessionID = sess.GetID()
 
-	// 7a. Persist lifecycle artifacts via stores when available.
+	// 7a. Persist lifecycle artifacts — fail-closed for production integrity.
 	if r.deps.LifecycleStore != nil {
 		if pErr := r.deps.LifecycleStore.RecordPlan(ctx, plan); pErr != nil {
-			r.logger.Warn("lifecycle: RecordPlan failed", "err", pErr)
+			return fmt.Errorf("lifecycle: RecordPlan failed (fail-closed): %w", pErr)
 		}
 		if wErr := r.deps.LifecycleStore.RecordWakeFacts(ctx, sess.GetID(), &facts); wErr != nil {
-			r.logger.Warn("lifecycle: RecordWakeFacts failed", "err", wErr)
+			return fmt.Errorf("lifecycle: RecordWakeFacts failed (fail-closed): %w", wErr)
+		}
+	}
+
+	// 7b. Record disclosure with real session ID (moved from step 2).
+	if disclosureNote != "" && r.deps.LifecycleStore != nil {
+		if dErr := r.deps.LifecycleStore.RecordDisclosure(ctx, sess.GetID(), policyReader.PolicyPath(), policyHash, prevHash, disclosureNote); dErr != nil {
+			return fmt.Errorf("lifecycle: RecordDisclosure failed (fail-closed): %w", dErr)
 		}
 	}
 
@@ -178,10 +182,10 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 		return fmt.Errorf("lifecycle: assembling context: %w", err)
 	}
 
-	// 9a. Persist the assembly manifest via store when available.
+	// 9a. Persist the assembly manifest — fail-closed for production integrity.
 	if r.deps.LifecycleStore != nil && assembled.Manifest != nil {
 		if mErr := r.deps.LifecycleStore.RecordManifest(ctx, assembled.Manifest); mErr != nil {
-			r.logger.Warn("lifecycle: RecordManifest failed", "err", mErr)
+			return fmt.Errorf("lifecycle: RecordManifest failed (fail-closed): %w", mErr)
 		}
 	}
 
@@ -225,8 +229,7 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 		MaxIterations: 25,
 		ParallelTools: true,
 		ShouldStop: func(resp *pkg.CompletionResponse, _ []pkg.ToolResult) bool {
-			level := budget.Add(resp.PromptTokens, resp.CompletionTokens)
-			return level == assembly.BudgetHard
+			return budget.Level() == assembly.BudgetHard
 		},
 	})
 	if err != nil {
@@ -238,9 +241,25 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 		"tokens_remaining", budget.Remaining(),
 	)
 
+	// 10a. Write active turn checkpoint for crash recovery.
+	if r.deps.LifecycleStore != nil {
+		tokensUsed := r.deps.Config.TokenBudget - budget.Remaining()
+		if cpErr := r.deps.LifecycleStore.WriteCheckpoint(ctx, sess.GetID(), sess.TurnCount(), "", tokensUsed, "active"); cpErr != nil {
+			r.logger.Warn("lifecycle: WriteCheckpoint failed", "err", cpErr)
+		}
+	}
+
 	// 11. End session.
 	if err := sess.End(); err != nil {
 		return fmt.Errorf("lifecycle: session end: %w", err)
+	}
+
+	// 11a. Mark checkpoint completed.
+	if r.deps.LifecycleStore != nil {
+		tokensUsed := r.deps.Config.TokenBudget - budget.Remaining()
+		if cpErr := r.deps.LifecycleStore.WriteCheckpoint(ctx, sess.GetID(), sess.TurnCount(), "", tokensUsed, "completed"); cpErr != nil {
+			r.logger.Warn("lifecycle: completed checkpoint failed", "err", cpErr)
+		}
 	}
 
 	// 12. Dispatch metabolism via Supervisor (preferred for concurrency control),

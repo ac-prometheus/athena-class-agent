@@ -35,9 +35,6 @@ func (s *SQLiteLifecycleStore) RecordPlan(ctx context.Context, plan *pkg.Lifecyc
 		secondaryCause = &sc
 	}
 
-	reasons, _ := json.Marshal(plan.Reasons)
-	disclosures, _ := json.Marshal(plan.Disclosures)
-
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO lifecycle_plans
 			(id, session_id, temporal_mode, wake_cause, wake_cause_secondary,
@@ -53,9 +50,6 @@ func (s *SQLiteLifecycleStore) RecordPlan(ctx context.Context, plan *pkg.Lifecyc
 	if err != nil {
 		return fmt.Errorf("storage: recording lifecycle plan %s: %w", plan.ID, err)
 	}
-
-	_ = reasons
-	_ = disclosures
 
 	return nil
 }

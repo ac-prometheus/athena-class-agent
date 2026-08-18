@@ -92,8 +92,9 @@ func (s *Session) RecordTurn(promptToks, completionToks int) {
 }
 
 // WriteCheckpoint upserts one row in session_checkpoints with the current turn state.
-// Called after each turn so a crash leaves an auditable record.
-// Silently skips if no DB is available.
+// Deprecated: Use LifecycleStore.WriteCheckpoint instead. This method uses
+// Postgres-specific SQL and will be removed when Postgres support is added
+// through the store layer.
 func (s *Session) WriteCheckpoint(ctx context.Context) error {
 	if s.db == nil {
 		return nil
@@ -153,9 +154,9 @@ func (is *InterruptedSession) InterruptNote() string {
 	)
 }
 
-// CheckpointScan queries session_checkpoints for active rows older than staleCheckpointAge,
-// marks them interrupted, and returns the interrupted sessions so the next orientation can
-// surface an in-band note. Returns nil slice if none found.
+// Deprecated: Use LifecycleStore.InterruptStaleCheckpoints instead. This method uses
+// Postgres-specific SQL and will be removed when Postgres support is added
+// through the store layer.
 func CheckpointScan(ctx context.Context, db platform.DB) ([]*InterruptedSession, error) {
 	if db == nil {
 		return nil, nil
