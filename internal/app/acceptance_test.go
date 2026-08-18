@@ -31,6 +31,11 @@ func acceptanceDB(t *testing.T) (*sql.DB, platform.DB) {
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	// SQLite in-memory databases are per-connection: each new connection in the
+	// pool sees a fresh, empty database.  Limiting to one open connection
+	// ensures that concurrent goroutines (e.g. the Supervisor's job goroutines)
+	// all share the same in-memory database that migrations were applied to.
+	db.SetMaxOpenConns(1)
 	t.Cleanup(func() { db.Close() })
 
 	schemaDir := filepath.Join(findRepoRoot(t), "schema")
@@ -507,3 +512,193 @@ func TestAcceptance_RecoveryAfterInterruptedLiveSession(t *testing.T) {
 
 // Silence unused import lint — fmt is used in queryScalar fatalf format strings.
 var _ = fmt.Sprintf
+
+// ---------------------------------------------------------------------------
+// acceptanceApp — HARN-93: NewApp composition root for acceptance scenarios
+// ---------------------------------------------------------------------------
+
+// acceptanceApp creates a fully-wired *App from the real NewApp() constructor
+// rather than from manual Dependencies construction. It injects:
+//   - a pre-migrated in-memory SQLite DB via WithDB so NewApp skips DSN-open
+//   - a stubLLM via WithLLM so no real HTTP calls are made
+//
+// The DatabaseDSN is set to a non-postgres string so DriverNameFromDSN returns
+// "sqlite3" and creates the SQLite-backed repository stores — even though the
+// actual DB handle was injected and the DSN is never opened by NewApp.
+func acceptanceApp(t *testing.T, pdb platform.DB, opts ...Option) *App {
+	t.Helper()
+	identityDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(identityDir, "soul.md"), []byte("test identity"), 0644); err != nil {
+		t.Fatalf("acceptanceApp: write soul.md: %v", err)
+	}
+	cfg := &platform.Config{
+		AgentName:        "ersa-test",
+		WorkspaceDir:     t.TempDir(),
+		IdentityDir:      identityDir,
+		TokenBudget:      200000,
+		HardFloorTokens:  1500,
+		DatabaseDSN:      "file::memory:?cache=shared", // non-postgres → driverName "sqlite3"
+		SkipWitnessCheck: true,
+	}
+	defaults := []Option{
+		WithLLM(&stubLLM{}),
+		WithDB(pdb),
+	}
+	appInstance, err := NewApp(cfg, ProfileDevelopment, append(defaults, opts...)...)
+	if err != nil {
+		t.Fatalf("acceptanceApp: %v", err)
+	}
+	return appInstance
+}
+
+// ---------------------------------------------------------------------------
+// HARN-93 Scenario 1: Ordinary Episodic Return via NewApp
+// ---------------------------------------------------------------------------
+
+// TestAcceptance_NewApp_OrdinaryEpisodicReturn verifies that RunSession driven
+// through the real NewApp composition graph (not manual stubs) writes rows to
+// the four key lifecycle tables: lifecycle_plans, assembly_manifests,
+// session_checkpoints, and metabolism_jobs.
+func TestAcceptance_NewApp_OrdinaryEpisodicReturn(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	appInstance := acceptanceApp(t, pdb)
+
+	ctx := context.Background()
+	if err := appInstance.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+
+	// Drain the supervisor so background metabolism goroutines finish before
+	// we assert DB state — the job is dispatched async after RunSession returns.
+	if appInstance.Supervisor != nil {
+		if err := appInstance.Supervisor.Drain(5 * time.Second); err != nil {
+			t.Logf("supervisor drain: %v", err)
+		}
+	}
+
+	planCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM lifecycle_plans`)
+	if planCount == 0 {
+		t.Error("expected at least one lifecycle_plans row")
+	}
+	manifestCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM assembly_manifests`)
+	if manifestCount == 0 {
+		t.Error("expected at least one assembly_manifests row")
+	}
+	checkpointCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM session_checkpoints`)
+	if checkpointCount == 0 {
+		t.Error("expected at least one session_checkpoints row")
+	}
+	jobCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM metabolism_jobs`)
+	if jobCount == 0 {
+		t.Error("expected at least one metabolism_jobs row")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HARN-93 Scenario 2: Metabolism Interruption Recovery via NewApp
+// ---------------------------------------------------------------------------
+
+// TestAcceptance_NewApp_MetabolismInterruptionRecovery simulates a process
+// crash: a metabolism job is left in "running" state with a started_at older
+// than the 5-minute stale-duration threshold that Claim uses.  After creating
+// the app via NewApp(), Supervisor.Recover() reclaims the stale job through
+// the real job runner and pipeline.  The job must reach "completed" status.
+func TestAcceptance_NewApp_MetabolismInterruptionRecovery(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+
+	// Insert a stale running job directly — simulates a job whose process
+	// crashed before it could complete.  started_at is 10 minutes ago, which
+	// is older than the 5-minute threshold in Claim's stale-duration check.
+	_, err := rawDB.Exec(
+		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, started_at, created_at)
+		 VALUES ('stale-running-job', 'session-crashed', 'running', 'standard',
+		         datetime('now', '-10 minutes'), datetime('now', '-10 minutes'))`,
+	)
+	if err != nil {
+		t.Fatalf("insert stale running job: %v", err)
+	}
+
+	// Create the app through the real NewApp() composition root — equivalent
+	// to daemon restart after the crash.
+	appInstance := acceptanceApp(t, pdb)
+
+	ctx := context.Background()
+
+	// Recover() is the daemon-startup call that finds and resubmits stale jobs.
+	n, err := appInstance.Supervisor.Recover(ctx, 3)
+	if err != nil {
+		t.Fatalf("Supervisor.Recover: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 recovered job, got %d", n)
+	}
+
+	// Wait for the recovery goroutine to finish before asserting DB state.
+	if err := appInstance.Supervisor.Drain(5 * time.Second); err != nil {
+		t.Logf("supervisor drain: %v", err)
+	}
+
+	status := queryScalar[string](t, rawDB,
+		`SELECT status FROM metabolism_jobs WHERE id = 'stale-running-job'`)
+	if status != "completed" {
+		t.Errorf("recovered job status = %q, want %q", status, "completed")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HARN-93 Scenario 3: Wake Before Metabolism Completion via NewApp
+// ---------------------------------------------------------------------------
+
+// TestAcceptance_NewApp_WakeBeforeMetabolismCompletion verifies that a new
+// session can start and complete cleanly even when a pending metabolism job
+// from a prior session is waiting in the queue.  After the session completes,
+// Recover() picks up the prior pending job and it must reach "completed".
+func TestAcceptance_NewApp_WakeBeforeMetabolismCompletion(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+
+	// Commit a pending job from a prior session — simulates a job that was
+	// enqueued but not yet claimed (e.g. prior session ended and process
+	// restarted before metabolism could run).
+	_, err := rawDB.Exec(
+		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, created_at)
+		 VALUES ('prior-pending-job', 'session-prior', 'pending', 'standard', CURRENT_TIMESTAMP)`,
+	)
+	if err != nil {
+		t.Fatalf("insert prior pending job: %v", err)
+	}
+
+	appInstance := acceptanceApp(t, pdb)
+
+	ctx := context.Background()
+
+	// RunSession must proceed smoothly — the prior pending job must not block
+	// or prevent the new session from starting.
+	if err := appInstance.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
+		t.Fatalf("RunSession blocked by prior pending job: %v", err)
+	}
+
+	// Recover the prior pending job via the Supervisor (daemon would call this
+	// at startup).  The new session's metabolism job was already submitted by
+	// RunSession via Supervisor.Submit().
+	if _, err := appInstance.Supervisor.Recover(ctx, 3); err != nil {
+		t.Fatalf("Supervisor.Recover: %v", err)
+	}
+
+	// Drain waits for both the new session's job and the prior pending job.
+	if err := appInstance.Supervisor.Drain(5 * time.Second); err != nil {
+		t.Logf("supervisor drain: %v", err)
+	}
+
+	// The prior pending job must have been processed and completed.
+	status := queryScalar[string](t, rawDB,
+		`SELECT status FROM metabolism_jobs WHERE id = 'prior-pending-job'`)
+	if status != "completed" {
+		t.Errorf("prior pending job status = %q, want %q", status, "completed")
+	}
+
+	// The new session must have generated its own metabolism job.
+	jobCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM metabolism_jobs`)
+	if jobCount < 2 {
+		t.Errorf("expected >= 2 metabolism_jobs (prior + new session), got %d", jobCount)
+	}
+}
