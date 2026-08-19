@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
@@ -210,7 +211,7 @@ func RedactDSN(dsn string) string {
 	}
 	// Simple: hide password in postgres:// URLs.
 	// For file paths (sqlite), return as-is.
-	if len(dsn) > 11 && (dsn[:11] == "postgres://" || dsn[:13] == "postgresql://") {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
 		// Redact between :// and @
 		start := 0
 		for i := range dsn {
