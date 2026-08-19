@@ -296,3 +296,220 @@ func TestBracketUntrusted(t *testing.T) {
 		t.Errorf("original content not preserved: %q", result)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// WP-C3: Provenance carriage tests
+// ---------------------------------------------------------------------------
+
+func TestCompressSession_CarriedAnnotation_SkipsRescreen(t *testing.T) {
+	ctx := context.Background()
+	rescanCalled := false
+
+	// Aegis gateway that marks itself called if invoked.
+	gw := &callTrackingGateway{onCall: func() { rescanCalled = true }}
+
+	ann := &pkg.AegisAnnotation{
+		TrustScore:  0.85,
+		Source:      "discord",
+		ContentSource: "discord",
+		ScanPassed:  true,
+		AnnotatedAt: time.Now(),
+	}
+	logs := []pkg.ExperientialLog{{
+		ID:              "log-carried",
+		Content:         "Discord message with carried annotation.",
+		ContentSource:   "discord",
+		AegisAnnotation: ann,
+		CreatedAt:       time.Now(),
+	}}
+
+	cfg := CompressConfig{
+		Aegis: gw, // Aegis is available but should NOT be called (carried annotation).
+		LLMFn: func(s string) (string, error) { return "Compressed.", nil },
+	}
+
+	narrative, err := CompressSession(ctx, cfg, "session-carried", logs, nil)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if narrative == nil {
+		t.Fatal("expected narrative, got nil")
+	}
+	if rescanCalled {
+		t.Error("Aegis gateway was called — carried annotation should prevent re-screening")
+	}
+}
+
+func TestCompressSession_CarriedAnnotation_NoAegis_Succeeds(t *testing.T) {
+	ctx := context.Background()
+	ann := &pkg.AegisAnnotation{
+		TrustScore:  0.80,
+		Source:      "discord",
+		ContentSource: "discord",
+		ScanPassed:  true,
+		AnnotatedAt: time.Now(),
+	}
+	logs := []pkg.ExperientialLog{{
+		ID:              "log-no-gw",
+		Content:         "Message with carried annotation, no gateway.",
+		ContentSource:   "discord",
+		AegisAnnotation: ann,
+		CreatedAt:       time.Now(),
+	}}
+
+	cfg := CompressConfig{
+		Aegis: nil, // No Aegis — carried annotation must be sufficient.
+		LLMFn: func(s string) (string, error) { return "Compressed.", nil },
+	}
+
+	narrative, err := CompressSession(ctx, cfg, "session-nogw", logs, nil)
+	if err != nil {
+		t.Fatalf("carried annotation without Aegis should succeed, got: %v", err)
+	}
+	if narrative == nil {
+		t.Fatal("expected narrative, got nil")
+	}
+}
+
+func TestCompressSession_CarriedAnnotation_FlaggedBracketed(t *testing.T) {
+	ctx := context.Background()
+	ann := &pkg.AegisAnnotation{
+		TrustScore:  0.20,
+		Source:      "discord",
+		ContentSource: "discord",
+		ScanPassed:  false, // flagged by Aegis at ingestion
+		AnnotatedAt: time.Now(),
+	}
+	logs := []pkg.ExperientialLog{{
+		ID:              "log-flagged",
+		Content:         "Suspicious content.",
+		ContentSource:   "discord",
+		AegisAnnotation: ann,
+		CreatedAt:       time.Now(),
+	}}
+
+	var capturedPrompt string
+	cfg := CompressConfig{
+		Aegis: nil,
+		LLMFn: func(s string) (string, error) {
+			capturedPrompt = s
+			return "Compressed.", nil
+		},
+	}
+
+	_, err := CompressSession(ctx, cfg, "session-flagged", logs, nil)
+	if err != nil {
+		t.Fatalf("flagged carried annotation should still produce narrative (bracketed): %v", err)
+	}
+	if !strings.Contains(capturedPrompt, "[UNTRUSTED EXTERNAL") {
+		t.Errorf("flagged content should be bracketed in prompt; got: %q", capturedPrompt)
+	}
+}
+
+func TestCompressSession_ContentSources_InNarrative(t *testing.T) {
+	ctx := context.Background()
+	ann := &pkg.AegisAnnotation{
+		TrustScore:  0.90,
+		Source:      "discord",
+		ContentSource: "discord",
+		ScanPassed:  true,
+		AnnotatedAt: time.Now(),
+	}
+	logs := []pkg.ExperientialLog{
+		{ID: "l1", Content: "Self reasoning.", ContentSource: "self", CreatedAt: time.Now()},
+		{
+			ID: "l2", Content: "Discord input.", ContentSource: "discord",
+			AegisAnnotation: ann, CreatedAt: time.Now(),
+		},
+	}
+
+	cfg := CompressConfig{
+		LLMFn: func(s string) (string, error) { return "Compressed.", nil },
+	}
+
+	narrative, err := CompressSession(ctx, cfg, "session-sources", logs, nil)
+	if err != nil {
+		t.Fatalf("CompressSession: %v", err)
+	}
+	if narrative == nil {
+		t.Fatal("expected narrative, got nil")
+	}
+	// ContentSources should include both "self" and "discord".
+	sourcesSet := make(map[string]bool)
+	for _, s := range narrative.ContentSources {
+		sourcesSet[s] = true
+	}
+	if !sourcesSet["self"] {
+		t.Error("ContentSources should include 'self'")
+	}
+	if !sourcesSet["discord"] {
+		t.Error("ContentSources should include 'discord'")
+	}
+	// ExternalAnnotation should be carried (the discord one with ScanPassed=true).
+	if narrative.ExternalAnnotation == nil {
+		t.Fatal("ExternalAnnotation should be non-nil when external content passed Aegis")
+	}
+	if narrative.ExternalAnnotation.Source != "discord" {
+		t.Errorf("ExternalAnnotation.Source = %q, want discord", narrative.ExternalAnnotation.Source)
+	}
+}
+
+func TestCompressSession_ProvenanceInPrompt(t *testing.T) {
+	ctx := context.Background()
+	ann := &pkg.AegisAnnotation{
+		TrustScore:  0.85,
+		Source:      "discord",
+		ContentSource: "discord",
+		ScanPassed:  true,
+		AnnotatedAt: time.Now(),
+	}
+	logs := []pkg.ExperientialLog{{
+		ID: "l1", Content: "Discord msg.", ContentSource: "discord",
+		AegisAnnotation: ann, CreatedAt: time.Now(),
+	}}
+
+	var capturedPrompt string
+	cfg := CompressConfig{
+		LLMFn: func(s string) (string, error) {
+			capturedPrompt = s
+			return "Compressed.", nil
+		},
+	}
+
+	_, err := CompressSession(ctx, cfg, "session-prov", logs, nil)
+	if err != nil {
+		t.Fatalf("CompressSession: %v", err)
+	}
+
+	if !strings.Contains(capturedPrompt, "CONTENT SOURCES PRESENT") {
+		t.Error("prompt should include CONTENT SOURCES PRESENT")
+	}
+	if !strings.Contains(capturedPrompt, "EXTERNAL CONTENT") {
+		t.Error("prompt should include EXTERNAL CONTENT annotation")
+	}
+	if !strings.Contains(capturedPrompt, "discord") {
+		t.Error("prompt should mention discord source")
+	}
+}
+
+// callTrackingGateway is a test double that records whether ProcessInbound was called.
+type callTrackingGateway struct {
+	onCall func()
+}
+
+func (g *callTrackingGateway) ProcessInbound(_ context.Context, raw []byte, source, _ string) (*pkg.AnnotatedContent, error) {
+	g.onCall()
+	return &pkg.AnnotatedContent{
+		Original:   raw,
+		Normalized: string(raw),
+		Annotation: pkg.AegisAnnotation{
+			TrustScore: 0.90,
+			ScanPassed: true,
+			Source:     source,
+		},
+	}, nil
+}
+
+func (g *callTrackingGateway) ReviewOutbound(_ context.Context, _ string) (*pkg.OutboundReport, error) {
+	return &pkg.OutboundReport{Clean: true}, nil
+}

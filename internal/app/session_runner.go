@@ -252,6 +252,32 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 		initialContent = header.String() + "\n\n" + trigger.InboundContent
 	}
 
+	// Persist inbound event to T2 with provenance before the engine loop (C-3, HARN-10).
+	// The inbound event is archived here so the provenance chain starts at ingestion:
+	// trigger.AegisAnnotation → T2.aegis_meta → T3.aegis_meta → assembly.
+	// Non-fatal: a write failure logs a warning but does not abort the session.
+	if trigger.InboundContent != "" && r.deps.MemoryStore != nil {
+		contentSource := trigger.InboundChannel
+		if contentSource == "" {
+			contentSource = "operator"
+		}
+		inboundEntry := pkg.ExperientialLog{
+			ID:              fmt.Sprintf("t2-inbound-%s-%d", sess.GetID(), time.Now().UnixNano()),
+			SessionID:       sess.GetID(),
+			Content:         initialContent,
+			ContentSource:   contentSource,
+			AegisAnnotation: trigger.AegisAnnotation,
+		}
+		if wErr := r.deps.MemoryStore.AppendExperiential(ctx, inboundEntry); wErr != nil {
+			r.logger.Warn("lifecycle: failed to persist inbound event to T2 — provenance chain incomplete",
+				"session", sess.GetID(), "channel", contentSource, "err", wErr)
+		} else {
+			r.logger.Debug("lifecycle: inbound event persisted to T2",
+				"session", sess.GetID(), "channel", contentSource,
+				"has_aegis", trigger.AegisAnnotation != nil)
+		}
+	}
+
 	req := pkg.CompletionRequest{
 		System: assembled.SystemPrompt,
 		Messages: []pkg.Message{

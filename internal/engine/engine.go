@@ -272,6 +272,9 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 			for _, r := range results {
 				tr.ToolCalls = append(tr.ToolCalls, r.CallID)
 			}
+			// Carry tool results so T2LoggerHook can write provenance entries
+			// on tool-only turns (C-2 fix, WP-C3).
+			tr.ToolResults = results
 			if err := e.hooks.RunAll(ctx, tr); err != nil {
 				return nil, fmt.Errorf("engine: critical hook error (iteration %d): %w", iterations, err)
 			}

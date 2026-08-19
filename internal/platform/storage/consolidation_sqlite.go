@@ -43,11 +43,14 @@ func (s *SQLiteConsolidationStore) CommitNarrative(ctx context.Context, narrativ
 	}
 	beliefJSON := beliefMetaJSON(narrative.Belief)
 	embVec := embeddingJSON(narrative.Embedding)
+	contentSrcsJSON := contentSourcesJSON(narrative.ContentSources)
+	aegisMeta := aegisMetaJSON(narrative.ExternalAnnotation)
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO narrative_summaries
-			(id, session_id, content, embedding, belief_meta, created_at)
-		 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+			(id, session_id, content, embedding, belief_meta, content_sources, aegis_meta, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
 		narrative.ID, narrative.SessionID, narrative.Content, embVec, beliefJSON,
+		contentSrcsJSON, aegisMeta,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: inserting T3 narrative %s: %w", narrative.ID, err)
@@ -76,7 +79,7 @@ func (s *SQLiteConsolidationStore) CommitNarrative(ctx context.Context, narrativ
 
 func (s *SQLiteConsolidationStore) UncoveredLogs(ctx context.Context, sessionID string) ([]pkg.ExperientialLog, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, content, content_source, created_at
+		`SELECT id, session_id, content, content_source, aegis_meta, created_at
 		 FROM experiential_logs
 		 WHERE session_id = ? AND narrative_summary_id IS NULL
 		 ORDER BY created_at ASC`,
@@ -90,12 +93,14 @@ func (s *SQLiteConsolidationStore) UncoveredLogs(ctx context.Context, sessionID 
 	var logs []pkg.ExperientialLog
 	for rows.Next() {
 		var log pkg.ExperientialLog
+		var aegisMetaStr string
 		if err := rows.Scan(
 			&log.ID, &log.SessionID, &log.Content,
-			&log.ContentSource, &log.CreatedAt,
+			&log.ContentSource, &aegisMetaStr, &log.CreatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("storage: scanning uncovered log: %w", err)
 		}
+		log.AegisAnnotation = decodeAegisMeta(aegisMetaStr)
 		logs = append(logs, log)
 	}
 	return logs, rows.Err()

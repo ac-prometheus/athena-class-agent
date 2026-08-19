@@ -25,16 +25,55 @@ func NewT2LoggerHook(store pkg.MemoryStore) *T2LoggerHook {
 func (h *T2LoggerHook) Name() string { return "tier2-logger" }
 
 func (h *T2LoggerHook) Run(ctx context.Context, turn TurnResult) error {
-	entry := pkg.ExperientialLog{
-		ID:            fmt.Sprintf("t2-%s-%d-%d", turn.SessionID, turn.TurnNumber, time.Now().UnixNano()),
-		SessionID:     turn.SessionID,
-		Content:       turn.Content,
-		ContentSource: "self",
+	now := time.Now().UnixNano()
+	logged := 0
+
+	// Log the agent's own text content (self-authored reasoning/response).
+	// C-2 fix: skip when content is empty — tool-only turns have no self text.
+	if turn.Content != "" {
+		entry := pkg.ExperientialLog{
+			ID:            fmt.Sprintf("t2-%s-%d-%d-self", turn.SessionID, turn.TurnNumber, now),
+			SessionID:     turn.SessionID,
+			Content:       turn.Content,
+			ContentSource: "self",
+		}
+		if err := h.store.AppendExperiential(ctx, entry); err != nil {
+			return fmt.Errorf("tier2-logger: self-content append failed (turn %d): %w", turn.TurnNumber, err)
+		}
+		logged++
 	}
-	if err := h.store.AppendExperiential(ctx, entry); err != nil {
-		return fmt.Errorf("tier2-logger: append failed (turn %d): %w", turn.TurnNumber, err)
+
+	// Log tool results as provenance entries (C-2 fix, WP-C3).
+	// Each tool result is a separate T2 entry with content_source="tool-result"
+	// so the compression pipeline can attribute and track provenance.
+	for i, r := range turn.ToolResults {
+		if r.Content == "" {
+			continue // skip empty tool results — nothing to archive
+		}
+		entry := pkg.ExperientialLog{
+			ID:            fmt.Sprintf("t2-%s-%d-%d-tool%d", turn.SessionID, turn.TurnNumber, now, i),
+			SessionID:     turn.SessionID,
+			Content:       r.Content,
+			ContentSource: pkg.ContentSourceToolResult,
+		}
+		if err := h.store.AppendExperiential(ctx, entry); err != nil {
+			return fmt.Errorf("tier2-logger: tool-result append failed (turn %d, call %s): %w",
+				turn.TurnNumber, r.CallID, err)
+		}
+		logged++
 	}
-	slog.Debug("tier2-logger: turn logged", "session", turn.SessionID, "turn", turn.TurnNumber)
+
+	if logged == 0 {
+		slog.Debug("tier2-logger: turn has no loggable content — skipping",
+			"session", turn.SessionID, "turn", turn.TurnNumber)
+		return nil
+	}
+
+	slog.Debug("tier2-logger: turn logged",
+		"session", turn.SessionID,
+		"turn", turn.TurnNumber,
+		"entries", logged,
+	)
 	return nil
 }
 

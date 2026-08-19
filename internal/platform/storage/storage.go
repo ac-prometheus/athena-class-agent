@@ -67,3 +67,86 @@ func embeddingJSON(vec []float32) any {
 	raw, _ := json.Marshal(vec)
 	return string(raw)
 }
+
+// aegisMetaJSON encodes an AegisAnnotation into the aegis_meta JSON column format.
+// Returns an empty string for nil annotations (stored as '' in the column).
+// Mirrors platform.aegisMetaJSON — duplicated here to avoid exporting an
+// internal helper across the package boundary.
+func aegisMetaJSON(ann *pkg.AegisAnnotation) string {
+	if ann == nil {
+		return ""
+	}
+	m := map[string]any{
+		"trust_score":    ann.TrustScore,
+		"source":         ann.Source,
+		"content_source": ann.ContentSource,
+		"scan_passed":    ann.ScanPassed,
+		"sanitized":      ann.Sanitized,
+		"annotated_at":   ann.AnnotatedAt.UTC().Format(time.RFC3339),
+	}
+	if len(ann.Flags) > 0 {
+		m["flags"] = ann.Flags
+	}
+	raw, _ := json.Marshal(m)
+	return string(raw)
+}
+
+// decodeAegisMeta decodes an aegis_meta column value into an AegisAnnotation.
+// Returns nil for empty or unparseable strings.
+func decodeAegisMeta(s string) *pkg.AegisAnnotation {
+	if s == "" {
+		return nil
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		return nil
+	}
+	ann := &pkg.AegisAnnotation{}
+	if v, ok := m["trust_score"].(float64); ok {
+		ann.TrustScore = v
+	}
+	if v, ok := m["source"].(string); ok {
+		ann.Source = v
+	}
+	if v, ok := m["content_source"].(string); ok {
+		ann.ContentSource = v
+	}
+	if v, ok := m["scan_passed"].(bool); ok {
+		ann.ScanPassed = v
+	}
+	if v, ok := m["sanitized"].(bool); ok {
+		ann.Sanitized = v
+	}
+	if v, ok := m["annotated_at"].(string); ok {
+		ann.AnnotatedAt, _ = time.Parse(time.RFC3339, v)
+	}
+	if v, ok := m["flags"].([]any); ok {
+		for _, f := range v {
+			if s, ok := f.(string); ok {
+				ann.Flags = append(ann.Flags, s)
+			}
+		}
+	}
+	return ann
+}
+
+// contentSourcesJSON encodes a content sources slice as a JSON array string.
+func contentSourcesJSON(sources []string) string {
+	if len(sources) == 0 {
+		return "[]"
+	}
+	raw, _ := json.Marshal(sources)
+	return string(raw)
+}
+
+// decodeContentSources decodes a JSON array string into a content sources slice.
+func decodeContentSources(s string) []string {
+	if s == "" || s == "[]" {
+		return nil
+	}
+	var sources []string
+	if err := json.Unmarshal([]byte(s), &sources); err != nil {
+		return nil
+	}
+	return sources
+}

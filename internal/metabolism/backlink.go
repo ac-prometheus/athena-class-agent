@@ -46,9 +46,12 @@ func AtomicT2T3Link(ctx context.Context, db platform.DB, driverName string, narr
 
 	// Step 1: INSERT the T3 narrative summary.
 	beliefJSON := beliefMetaJSON(narrative.Belief)
+	contentSrcsJSON := narrativeContentSourcesJSON(narrative.ContentSources)
+	aegisMetaStr := narrativeAegisMetaJSON(narrative.ExternalAnnotation)
 	insertQ := narrativeInsertSQL(driverName)
 	if _, err := tx.ExecContext(ctx, insertQ,
 		narrative.ID, narrative.SessionID, narrative.Content, beliefJSON,
+		contentSrcsJSON, aegisMetaStr,
 	); err != nil {
 		return fmt.Errorf("metabolism: inserting T3 narrative %s: %w", narrative.ID, err)
 	}
@@ -67,15 +70,48 @@ func AtomicT2T3Link(ctx context.Context, db platform.DB, driverName string, narr
 
 // narrativeInsertSQL returns the INSERT statement for a T3 narrative summary,
 // using the correct placeholder syntax for the given driver.
+// Includes content_sources and aegis_meta for WP-C3 provenance carriage.
 func narrativeInsertSQL(driver string) string {
 	if driver == "postgres" {
 		return `INSERT INTO narrative_summaries
-			(id, session_id, content, belief_meta, created_at)
-			VALUES ($1, $2, $3, $4::jsonb, now())`
+			(id, session_id, content, belief_meta, content_sources, aegis_meta, created_at)
+			VALUES ($1, $2, $3, $4::jsonb, $5, $6, now())`
 	}
 	return `INSERT INTO narrative_summaries
-		(id, session_id, content, belief_meta, created_at)
-		VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`
+		(id, session_id, content, belief_meta, content_sources, aegis_meta, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`
+}
+
+// narrativeContentSourcesJSON encodes a content sources slice as a JSON array.
+// Mirrors contentSourcesJSON in platform/db.go — duplicated here to avoid
+// importing an unexported helper across the package boundary.
+func narrativeContentSourcesJSON(sources []string) string {
+	if len(sources) == 0 {
+		return "[]"
+	}
+	raw, _ := json.Marshal(sources)
+	return string(raw)
+}
+
+// narrativeAegisMetaJSON encodes an AegisAnnotation for the T3 aegis_meta column.
+// Mirrors aegisMetaJSON in platform/db.go — duplicated to avoid cross-package dependency.
+func narrativeAegisMetaJSON(ann *pkg.AegisAnnotation) string {
+	if ann == nil {
+		return ""
+	}
+	m := map[string]any{
+		"trust_score":    ann.TrustScore,
+		"source":         ann.Source,
+		"content_source": ann.ContentSource,
+		"scan_passed":    ann.ScanPassed,
+		"sanitized":      ann.Sanitized,
+		"annotated_at":   ann.AnnotatedAt.UTC().Format(time.RFC3339),
+	}
+	if len(ann.Flags) > 0 {
+		m["flags"] = ann.Flags
+	}
+	raw, _ := json.Marshal(m)
+	return string(raw)
 }
 
 // t2BacklinkSQL builds the UPDATE statement and args for setting

@@ -85,7 +85,21 @@ func (p *ContinuityPhase) assembleContinuity(
 			recentNarrative = n.Content
 		}
 		manifest.NarrativeLoaded++
-		parts = append(parts, n.Content)
+
+		// Surface external content provenance (WP-C3): when a T3 summary was
+		// compressed from external channel input, prepend a structured note so
+		// the agent knows the source and trust level of that prior experience.
+		content := n.Content
+		if n.ExternalAnnotation != nil {
+			provNote := fmt.Sprintf(
+				"[Content-Provenance: this summary includes external input from %s (trust=%.2f, scan_passed=%v)]",
+				n.ExternalAnnotation.Source,
+				n.ExternalAnnotation.TrustScore,
+				n.ExternalAnnotation.ScanPassed,
+			)
+			content = provNote + "\n" + content
+		}
+		parts = append(parts, content)
 		if i >= 1 {
 			break // load at most 2 recent narratives in continuity phase
 		}

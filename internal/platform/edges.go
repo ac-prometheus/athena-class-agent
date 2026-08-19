@@ -50,9 +50,11 @@ func jsonUpdate(driverName, col, path, valuePH string) string {
 // ---------------------------------------------------------------------------
 
 // QueryLogs retrieves T2 experiential log entries for a session, oldest-first.
+// aegis_meta is included so the compression pipeline can carry the annotation
+// instead of re-screening (WP-C3 provenance carriage).
 func (s *SQLiteStore) QueryLogs(ctx context.Context, sessionID string, limit int) ([]pkg.ExperientialLog, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, content, content_source, created_at
+		`SELECT id, session_id, content, content_source, aegis_meta, created_at
 		 FROM experiential_logs
 		 WHERE session_id = ?
 		 ORDER BY created_at ASC
@@ -67,11 +69,13 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, sessionID string, limit int
 	var out []pkg.ExperientialLog
 	for rows.Next() {
 		var e pkg.ExperientialLog
+		var aegisMetaStr string
 		var createdAt time.Time
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &e.ContentSource, &createdAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &e.ContentSource, &aegisMetaStr, &createdAt); err != nil {
 			return nil, fmt.Errorf("platform: scanning log row: %w", err)
 		}
 		e.CreatedAt = createdAt
+		e.AegisAnnotation = decodeAegisMeta(aegisMetaStr)
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -326,9 +330,11 @@ func (s *SQLiteStore) MarkNeedsReview(ctx context.Context, id string, tier int) 
 // ---------------------------------------------------------------------------
 
 // QueryLogs retrieves T2 experiential log entries for a session, oldest-first.
+// aegis_meta is included so the compression pipeline can carry the annotation
+// instead of re-screening (WP-C3 provenance carriage).
 func (p *PostgresStore) QueryLogs(ctx context.Context, sessionID string, limit int) ([]pkg.ExperientialLog, error) {
 	rows, err := p.pool.Query(ctx,
-		`SELECT id, session_id, content, content_source, created_at
+		`SELECT id, session_id, content, content_source, aegis_meta, created_at
 		 FROM experiential_logs
 		 WHERE session_id = $1
 		 ORDER BY created_at ASC
@@ -343,11 +349,13 @@ func (p *PostgresStore) QueryLogs(ctx context.Context, sessionID string, limit i
 	var out []pkg.ExperientialLog
 	for rows.Next() {
 		var e pkg.ExperientialLog
+		var aegisMetaStr string
 		var createdAt time.Time
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &e.ContentSource, &createdAt); err != nil {
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &e.ContentSource, &aegisMetaStr, &createdAt); err != nil {
 			return nil, fmt.Errorf("platform: scanning log row: %w", err)
 		}
 		e.CreatedAt = createdAt
+		e.AegisAnnotation = decodeAegisMeta(aegisMetaStr)
 		out = append(out, e)
 	}
 	return out, rows.Err()

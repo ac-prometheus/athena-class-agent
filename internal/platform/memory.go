@@ -17,12 +17,14 @@ import (
 
 // AppendExperiential inserts a T2 experiential log entry (append-only).
 // T2 has no embedding column — it is an archive, not a retrieval target.
+// AegisAnnotation is serialized into the aegis_meta column when present (WP-C3).
 func (s *SQLiteStore) AppendExperiential(ctx context.Context, entry pkg.ExperientialLog) error {
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO experiential_logs
-			(id, session_id, content, content_source, embedding_pending, created_at)
-		 VALUES (?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`,
+			(id, session_id, content, content_source, aegis_meta, embedding_pending, created_at)
+		 VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`,
 		entry.ID, entry.SessionID, entry.Content, entry.ContentSource,
+		aegisMetaJSON(entry.AegisAnnotation),
 	)
 	return err
 }
@@ -31,9 +33,10 @@ func (s *SQLiteStore) AppendExperiential(ctx context.Context, entry pkg.Experien
 // When embedding is non-nil, vector similarity search is handled by the
 // VectorIndex layer (sqlite-vec); this method provides the recency-first
 // fallback that surfaces committed narratives during context assembly.
+// ContentSources and ExternalAnnotation are loaded for provenance surfacing (WP-C3).
 func (s *SQLiteStore) SearchNarrative(ctx context.Context, _ []float32, limit int) ([]pkg.NarrativeSummary, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, session_id, content, belief_meta
+		`SELECT id, session_id, content, belief_meta, content_sources, aegis_meta
 		 FROM narrative_summaries
 		 ORDER BY created_at DESC LIMIT ?`, limit,
 	)
@@ -45,18 +48,21 @@ func (s *SQLiteStore) SearchNarrative(ctx context.Context, _ []float32, limit in
 	var out []pkg.NarrativeSummary
 	for rows.Next() {
 		var n pkg.NarrativeSummary
-		var metaJSON string
-		if err := rows.Scan(&n.ID, &n.SessionID, &n.Content, &metaJSON); err != nil {
+		var metaJSON, contentSrcsStr, aegisMetaStr string
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Content, &metaJSON, &contentSrcsStr, &aegisMetaStr); err != nil {
 			return nil, err
 		}
 		n.Belief = decodeBelief(metaJSON, nil)
+		n.ContentSources = decodeContentSources(contentSrcsStr)
+		n.ExternalAnnotation = decodeAegisMeta(aegisMetaStr)
 		out = append(out, n)
 	}
 	return out, rows.Err()
 }
 
 // InsertNarrative inserts a T3 narrative summary.
-// Belief anchors are stored in belief_meta JSON; base_confidence is a separate column.
+// Belief anchors are stored in belief_meta JSON; ContentSources and ExternalAnnotation
+// are stored in their respective columns for provenance carriage (WP-C3).
 func (s *SQLiteStore) InsertNarrative(ctx context.Context, summary pkg.NarrativeSummary) error {
 	belief := summary.Belief
 	if belief == nil {
@@ -73,9 +79,10 @@ func (s *SQLiteStore) InsertNarrative(ctx context.Context, summary pkg.Narrative
 
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO narrative_summaries
-			(id, session_id, content, belief_meta, created_at)
-		 VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+			(id, session_id, content, belief_meta, content_sources, aegis_meta, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
 		summary.ID, "", summary.Content, beliefMetaJSON(belief),
+		contentSourcesJSON(summary.ContentSources), aegisMetaJSON(summary.ExternalAnnotation),
 	)
 	return err
 }
@@ -255,12 +262,14 @@ func (s *SQLiteStore) ListProfiles(ctx context.Context) ([]pkg.RelationalProfile
 }
 // AppendExperiential inserts a T2 experiential log entry (append-only).
 // T2 has no embedding column — it is an archive, not a retrieval target.
+// AegisAnnotation is serialized into the aegis_meta column when present (WP-C3).
 func (p *PostgresStore) AppendExperiential(ctx context.Context, entry pkg.ExperientialLog) error {
 	_, err := p.pool.Exec(ctx,
 		`INSERT INTO experiential_logs
-			(id, session_id, content, content_source, embedding_pending, created_at)
-		 VALUES ($1, $2, $3, $4, TRUE, now())`,
+			(id, session_id, content, content_source, aegis_meta, embedding_pending, created_at)
+		 VALUES ($1, $2, $3, $4, $5, TRUE, now())`,
 		entry.ID, entry.SessionID, entry.Content, entry.ContentSource,
+		aegisMetaJSON(entry.AegisAnnotation),
 	)
 	return err
 }
@@ -269,9 +278,10 @@ func (p *PostgresStore) AppendExperiential(ctx context.Context, entry pkg.Experi
 // When embedding is non-nil, vector similarity search is handled by the
 // pgvector VectorIndex layer; this method provides the recency-first fallback
 // that surfaces committed narratives during context assembly.
+// ContentSources and ExternalAnnotation are loaded for provenance surfacing (WP-C3).
 func (p *PostgresStore) SearchNarrative(ctx context.Context, _ []float32, limit int) ([]pkg.NarrativeSummary, error) {
 	rows, err := p.pool.Query(ctx,
-		`SELECT id, session_id, content, belief_meta::text
+		`SELECT id, session_id, content, belief_meta::text, content_sources, aegis_meta
 		 FROM narrative_summaries
 		 ORDER BY created_at DESC LIMIT $1`, limit,
 	)
@@ -283,17 +293,20 @@ func (p *PostgresStore) SearchNarrative(ctx context.Context, _ []float32, limit 
 	var out []pkg.NarrativeSummary
 	for rows.Next() {
 		var n pkg.NarrativeSummary
-		var metaJSON string
-		if err := rows.Scan(&n.ID, &n.SessionID, &n.Content, &metaJSON); err != nil {
+		var metaJSON, contentSrcsStr, aegisMetaStr string
+		if err := rows.Scan(&n.ID, &n.SessionID, &n.Content, &metaJSON, &contentSrcsStr, &aegisMetaStr); err != nil {
 			return nil, err
 		}
 		n.Belief = decodeBelief(metaJSON, nil)
+		n.ContentSources = decodeContentSources(contentSrcsStr)
+		n.ExternalAnnotation = decodeAegisMeta(aegisMetaStr)
 		out = append(out, n)
 	}
 	return out, rows.Err()
 }
 
 // InsertNarrative inserts a T3 narrative summary.
+// ContentSources and ExternalAnnotation are stored for provenance carriage (WP-C3).
 func (p *PostgresStore) InsertNarrative(ctx context.Context, summary pkg.NarrativeSummary) error {
 	belief := summary.Belief
 	if belief == nil {
@@ -310,9 +323,10 @@ func (p *PostgresStore) InsertNarrative(ctx context.Context, summary pkg.Narrati
 
 	_, err := p.pool.Exec(ctx,
 		`INSERT INTO narrative_summaries
-			(id, session_id, content, belief_meta, created_at)
-		 VALUES ($1, $2, $3, $4::jsonb, now())`,
+			(id, session_id, content, belief_meta, content_sources, aegis_meta, created_at)
+		 VALUES ($1, $2, $3, $4::jsonb, $5, $6, now())`,
 		summary.ID, "", summary.Content, beliefMetaJSON(belief),
+		contentSourcesJSON(summary.ContentSources), aegisMetaJSON(summary.ExternalAnnotation),
 	)
 	return err
 }

@@ -60,6 +60,12 @@ type ExperientialLog struct {
 	Content       string
 	ContentSource string // "self", "operator", "tool-result", "browser-content", "search-result", "forum-content"
 	CreatedAt     time.Time
+	// AegisAnnotation is the Aegis screening result carried from ingest.
+	// Non-nil when the log was created from an Aegis-screened inbound channel event
+	// (e.g. discord, forum). Nil for self-authored or operator content.
+	// Persisted in the aegis_meta column; metabolism uses it to verify the annotation
+	// instead of re-screening (WP-C3 provenance carriage).
+	AegisAnnotation *AegisAnnotation `json:"aegis_annotation,omitempty"`
 	// Register holds system-observed metadata about the log entry's register
 	// qualities (certainty, temperature, exploratory language, self-authored).
 	// DORMANT: computed but not stored or surfaced until consent scopes are
@@ -74,6 +80,15 @@ type NarrativeSummary struct {
 	Content   string
 	Belief    *BeliefMeta
 	Embedding []float32
+	// ContentSources lists the distinct content_source values present in the T2
+	// logs compressed into this summary (e.g. ["discord", "self"]). Populated
+	// by the compression pipeline and persisted in the content_sources column.
+	// Assembly surfaces this so the agent knows what external input shaped a summary.
+	ContentSources []string
+	// ExternalAnnotation is the Aegis annotation carried from the highest-trust
+	// external T2 log in this summary. Nil when no external content was present.
+	// Persisted in the aegis_meta column; assembly surfaces it as provenance.
+	ExternalAnnotation *AegisAnnotation
 }
 
 // Reflection is a T4 agent-authored reflection.

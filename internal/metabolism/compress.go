@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,39 +44,72 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 		return nil, fmt.Errorf("compress: LLM function required for T2→T3 compression")
 	}
 
-	// Aegis gate: verify all external content has been screened.
-	// If external content has no Aegis gateway to screen it, the job must
-	// stop with review_required — T2 stays intact, nothing is promoted.
+	// Aegis gate: collect distinct content sources and verify external content.
+	// WP-C3: when a T2 log carries an AegisAnnotation from ingest, use the
+	// carried annotation instead of re-screening. This preserves the ingestion
+	// provenance chain and avoids redundant scanning.
+	contentSourceSet := make(map[string]struct{})
+	var bestCarriedAnnotation *pkg.AegisAnnotation // highest trust-score external annotation
+
 	var contentParts []string
 	for _, log := range logs {
+		contentSourceSet[log.ContentSource] = struct{}{}
 		entry := log.Content
+
 		if isExternalSource(log.ContentSource) {
-			if cfg.Aegis == nil {
-				// No Aegis gateway available — cannot screen external content.
+			if log.AegisAnnotation != nil {
+				// Carried annotation from ingestion — verify instead of re-screen (WP-C3).
+				if !log.AegisAnnotation.ScanPassed {
+					slog.Warn("compress: carried annotation flagged — bracketing as untrusted",
+						"log_id", log.ID,
+						"source", log.ContentSource,
+						"trust", log.AegisAnnotation.TrustScore,
+					)
+					entry = bracketUntrusted(entry, log.ContentSource)
+				} else {
+					// Carry forward the annotation with the highest trust score for T3.
+					if bestCarriedAnnotation == nil || log.AegisAnnotation.TrustScore > bestCarriedAnnotation.TrustScore {
+						bestCarriedAnnotation = log.AegisAnnotation
+					}
+				}
+			} else if cfg.Aegis == nil {
+				// No Aegis gateway and no carried annotation — cannot screen external content.
 				// Return ErrReviewRequired so the job is marked review_required
 				// instead of silently bracketing and promoting untrusted text.
-				slog.Warn("compress: external content without Aegis — review required",
+				slog.Warn("compress: external content without Aegis or carried annotation — review required",
 					"log_id", log.ID, "source", log.ContentSource)
 				return nil, ErrReviewRequired
-			}
-			annotated, err := cfg.Aegis.ProcessInbound(ctx, []byte(entry), "compression", log.ContentSource)
-			if err != nil {
-				slog.Warn("compress: aegis scan error — bracketing as untrusted", "log_id", log.ID, "err", err)
-				entry = bracketUntrusted(entry, log.ContentSource)
-			} else if !annotated.Annotation.ScanPassed {
-				slog.Warn("compress: aegis flagged content — bracketing as untrusted",
-					"log_id", log.ID,
-					"flags", annotated.Annotation.Flags,
-					"trust", annotated.Annotation.TrustScore,
-				)
-				entry = bracketUntrusted(entry, log.ContentSource)
+			} else {
+				// No carried annotation; fall back to live Aegis screening.
+				annotated, err := cfg.Aegis.ProcessInbound(ctx, []byte(entry), "compression", log.ContentSource)
+				if err != nil {
+					slog.Warn("compress: aegis scan error — bracketing as untrusted", "log_id", log.ID, "err", err)
+					entry = bracketUntrusted(entry, log.ContentSource)
+				} else if !annotated.Annotation.ScanPassed {
+					slog.Warn("compress: aegis flagged content — bracketing as untrusted",
+						"log_id", log.ID,
+						"flags", annotated.Annotation.Flags,
+						"trust", annotated.Annotation.TrustScore,
+					)
+					entry = bracketUntrusted(entry, log.ContentSource)
+				} else if bestCarriedAnnotation == nil || annotated.Annotation.TrustScore > bestCarriedAnnotation.TrustScore {
+					ann := annotated.Annotation
+					bestCarriedAnnotation = &ann
+				}
 			}
 		}
 		contentParts = append(contentParts, entry)
 	}
 
-	// Build salience-weighted compression prompt.
-	prompt := buildCompressionPrompt(contentParts, scores)
+	// Collect distinct content sources for T3 metadata (sorted for determinism).
+	contentSources := make([]string, 0, len(contentSourceSet))
+	for src := range contentSourceSet {
+		contentSources = append(contentSources, src)
+	}
+	sort.Strings(contentSources)
+
+	// Build salience-weighted compression prompt including provenance context.
+	prompt := buildCompressionPrompt(contentParts, scores, contentSources, bestCarriedAnnotation)
 	compressed, err := cfg.LLMFn(prompt)
 	if err != nil {
 		return nil, fmt.Errorf("compress: LLM compression call: %w", err)
@@ -96,6 +130,8 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 		ID:        newMetabolismID(),
 		SessionID: sessionID,
 		Content:   compressed,
+		ContentSources:     contentSources,
+		ExternalAnnotation: bestCarriedAnnotation,
 		Belief: &pkg.BeliefMeta{
 			BaseConfidence:    0.85,
 			InferenceDistance:  1,
@@ -110,12 +146,28 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 }
 
 // buildCompressionPrompt constructs the LLM prompt for T2→T3 compression
-// with honesty tag instructions and salience weighting.
-func buildCompressionPrompt(entries []string, scores []SalienceResult) string {
+// with honesty tag instructions, salience weighting, and provenance context.
+// contentSources lists the distinct source types present (WP-C3); extAnnotation
+// carries the ingress Aegis annotation for any external content (may be nil).
+func buildCompressionPrompt(entries []string, scores []SalienceResult, contentSources []string, extAnnotation *pkg.AegisAnnotation) string {
 	var b strings.Builder
 	b.WriteString("Compress the following session logs into a narrative summary. ")
 	b.WriteString("Preserve: standing commitments, decisions with reasoning, verification events, ")
 	b.WriteString("relational updates, key facts with sources, open questions.\n\n")
+
+	// Surface provenance context so the compressor treats sources accurately.
+	if len(contentSources) > 0 {
+		b.WriteString(fmt.Sprintf("CONTENT SOURCES PRESENT: %s\n", strings.Join(contentSources, ", ")))
+	}
+	if extAnnotation != nil {
+		b.WriteString(fmt.Sprintf(
+			"EXTERNAL CONTENT: source=%s trust=%.2f scan_passed=%v (annotation carried from ingest — do not re-attribute)\n",
+			extAnnotation.Source, extAnnotation.TrustScore, extAnnotation.ScanPassed,
+		))
+	}
+	if len(contentSources) > 0 || extAnnotation != nil {
+		b.WriteString("\n")
+	}
 
 	// Include salience weighting instructions when scores are available.
 	if len(scores) > 0 {

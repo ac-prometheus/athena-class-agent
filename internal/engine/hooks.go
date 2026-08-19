@@ -5,6 +5,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // TurnResult carries the output of a completed turn for post-turn hooks.
@@ -14,6 +16,10 @@ type TurnResult struct {
 	TurnNumber       int
 	Content          string
 	ToolCalls        []string
+	// ToolResults carries the outputs of tool calls executed this turn.
+	// Non-nil when the turn had tool calls. Used by T2LoggerHook to write
+	// tool provenance entries to T2 on tool-only turns (C-2 fix, WP-C3).
+	ToolResults      []pkg.ToolResult
 	PromptTokens     int
 	CompletionTokens int
 	ThinkingTokens   int
