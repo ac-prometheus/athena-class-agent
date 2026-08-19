@@ -169,8 +169,12 @@ func TestJobStore_CommitClaimComplete(t *testing.T) {
 	}
 
 	// Claim.
-	if err := store.Claim(ctx, jobID, 5*time.Minute); err != nil {
+	claimToken, err := store.Claim(ctx, jobID, 5*time.Minute)
+	if err != nil {
 		t.Fatalf("Claim: %v", err)
+	}
+	if claimToken == "" {
+		t.Fatal("Claim returned empty token")
 	}
 	if err := raw.QueryRow("SELECT status FROM metabolism_jobs WHERE id = ?", jobID).Scan(&status); err != nil {
 		t.Fatalf("query status: %v", err)
@@ -180,7 +184,7 @@ func TestJobStore_CommitClaimComplete(t *testing.T) {
 	}
 
 	// Complete.
-	if err := store.Complete(ctx, jobID); err != nil {
+	if err := store.Complete(ctx, jobID, claimToken); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 	if err := raw.QueryRow("SELECT status FROM metabolism_jobs WHERE id = ?", jobID).Scan(&status); err != nil {
@@ -201,7 +205,12 @@ func TestJobStore_CommitFail(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	if err := store.Fail(ctx, jobID, "LLM timeout"); err != nil {
+	claimToken, err := store.Claim(ctx, jobID, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	if err := store.Fail(ctx, jobID, claimToken, "LLM timeout"); err != nil {
 		t.Fatalf("Fail: %v", err)
 	}
 
@@ -233,7 +242,12 @@ func TestJobStore_MarkReviewRequired(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	if err := store.MarkReviewRequired(ctx, jobID, "unannotated external content"); err != nil {
+	claimToken, err := store.Claim(ctx, jobID, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+
+	if err := store.MarkReviewRequired(ctx, jobID, claimToken, "unannotated external content"); err != nil {
 		t.Fatalf("MarkReviewRequired: %v", err)
 	}
 
@@ -261,11 +275,11 @@ func TestJobStore_DoubleClaimReturnsErrJobNotPending(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	if err := store.Claim(ctx, jobID, 5*time.Minute); err != nil {
+	if _, err := store.Claim(ctx, jobID, 5*time.Minute); err != nil {
 		t.Fatalf("first Claim: %v", err)
 	}
 
-	err = store.Claim(ctx, jobID, 5*time.Minute)
+	_, err = store.Claim(ctx, jobID, 5*time.Minute)
 	if !errors.Is(err, pkg.ErrJobNotPending) {
 		t.Errorf("second Claim = %v, want ErrJobNotPending", err)
 	}
@@ -287,7 +301,7 @@ func TestJobStore_Recoverable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit 2: %v", err)
 	}
-	if err := store.Claim(ctx, id2, 5*time.Minute); err != nil {
+	if _, err := store.Claim(ctx, id2, 5*time.Minute); err != nil {
 		t.Fatalf("Claim 2: %v", err)
 	}
 
@@ -296,10 +310,11 @@ func TestJobStore_Recoverable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Commit 3: %v", err)
 	}
-	if err := store.Claim(ctx, id3, 5*time.Minute); err != nil {
+	token3, err := store.Claim(ctx, id3, 5*time.Minute)
+	if err != nil {
 		t.Fatalf("Claim 3: %v", err)
 	}
-	if err := store.Complete(ctx, id3); err != nil {
+	if err := store.Complete(ctx, id3, token3); err != nil {
 		t.Fatalf("Complete 3: %v", err)
 	}
 
@@ -615,7 +630,7 @@ func TestLifecycleStore_RecordDisclosureAndLastPolicyHash(t *testing.T) {
 	ctx := context.Background()
 	store := NewSQLiteLifecycleStore(db)
 
-	if err := store.RecordDisclosure(ctx, "sess-disc", "/workspace/lifecycle.json", "hash-new", "hash-old", "temporal_mode changed"); err != nil {
+	if err := store.RecordDisclosure(ctx, "sess-disc", "/workspace/lifecycle.json", "hash-new", "hash-old", "temporal_mode changed", "workspace:/workspace/lifecycle.json", `{"temporal_mode":"episodic"}`); err != nil {
 		t.Fatalf("RecordDisclosure: %v", err)
 	}
 

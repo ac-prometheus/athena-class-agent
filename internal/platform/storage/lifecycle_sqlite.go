@@ -127,16 +127,18 @@ func (s *SQLiteLifecycleStore) RecordManifest(ctx context.Context, manifest *pkg
 	return nil
 }
 
-func (s *SQLiteLifecycleStore) RecordDisclosure(ctx context.Context, sessionID, policyPath, policyHash, previousHash, changesSummary string) error {
+func (s *SQLiteLifecycleStore) RecordDisclosure(ctx context.Context, sessionID, policyPath, policyHash, previousHash, changesSummary, policySource, policySnapshot string) error {
 	var prevHash interface{}
 	if previousHash != "" {
 		prevHash = previousHash
 	}
 	_, err := s.db.ExecContext(ctx,
 		`INSERT INTO configuration_applied
-			(session_id, policy_path, policy_hash, previous_hash, changes_summary, applied_at)
-		 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+			(session_id, policy_path, policy_hash, previous_hash, changes_summary,
+			 policy_source, policy_snapshot, applied_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
 		sessionID, policyPath, policyHash, prevHash, changesSummary,
+		policySource, policySnapshot,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: recording disclosure for session %s: %w", sessionID, err)

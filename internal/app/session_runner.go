@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -157,7 +158,9 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 
 	// 7b. Record disclosure with real session ID (moved from step 2).
 	if disclosureNote != "" && r.deps.LifecycleStore != nil {
-		if dErr := r.deps.LifecycleStore.RecordDisclosure(ctx, sess.GetID(), policyReader.PolicyPath(), policyHash, prevHash, disclosureNote); dErr != nil {
+		policySource := "workspace:" + policyReader.PolicyPath()
+		policySnapshot, _ := json.Marshal(policy)
+		if dErr := r.deps.LifecycleStore.RecordDisclosure(ctx, sess.GetID(), policyReader.PolicyPath(), policyHash, prevHash, disclosureNote, policySource, string(policySnapshot)); dErr != nil {
 			return fmt.Errorf("lifecycle: RecordDisclosure failed (fail-closed): %w", dErr)
 		}
 	}

@@ -360,7 +360,7 @@ func TestAcceptance_WakeBeforeMetabolismCompletion(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	if err := deps.JobStore.Claim(ctx, jobID, 5*time.Minute); err != nil {
+	if _, err := deps.JobStore.Claim(ctx, jobID, 5*time.Minute); err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
 

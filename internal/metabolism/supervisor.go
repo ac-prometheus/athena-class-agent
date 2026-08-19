@@ -75,7 +75,8 @@ func (s *Supervisor) Submit(ctx context.Context, sessionID, jobType string) erro
 
 // Recover scans for stalled jobs (pending/running from a previous crash)
 // and resubmits each through the same bounded dispatch path. Returns the
-// count of jobs resubmitted.
+// count of jobs dispatched (not necessarily claimed — claim happens inside
+// the goroutine and may be skipped if another worker got there first).
 func (s *Supervisor) Recover(ctx context.Context, maxRetries int) (int, error) {
 	jobs, err := s.runner.store.Recoverable(ctx, maxRetries)
 	if err != nil {

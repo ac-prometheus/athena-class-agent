@@ -67,7 +67,8 @@ func (r *JobRunner) Submit(ctx context.Context, sessionID, jobType string) error
 // Both Submit (new work) and RecoverStalled (crash recovery) funnel
 // through this method, so the state machine lives in exactly one place.
 func (r *JobRunner) Run(ctx context.Context, jobID, sessionID string) error {
-	if err := r.store.Claim(ctx, jobID, 5*time.Minute); err != nil {
+	claimToken, err := r.store.Claim(ctx, jobID, 5*time.Minute)
+	if err != nil {
 		if errors.Is(err, pkg.ErrJobNotPending) {
 			r.logger.Info("jobrunner: job already claimed — skipping",
 				"job_id", jobID, "session_id", sessionID)
@@ -80,29 +81,26 @@ func (r *JobRunner) Run(ctx context.Context, jobID, sessionID string) error {
 		"job_id", jobID, "session_id", sessionID)
 
 	if err := r.pipeline.ProcessSession(ctx, sessionID); err != nil {
-		// ErrReviewRequired is not a crash — external content needs human
-		// review before it can be promoted. Mark the job review_required
-		// instead of failed so it won't be retried automatically.
 		if errors.Is(err, ErrReviewRequired) {
 			r.logger.Info("jobrunner: pipeline requires review — marking review_required",
 				"job_id", jobID, "session_id", sessionID)
-			if rErr := r.store.MarkReviewRequired(ctx, jobID, err.Error()); rErr != nil {
+			if rErr := r.store.MarkReviewRequired(ctx, jobID, claimToken, err.Error()); rErr != nil {
 				r.logger.Error("jobrunner: failed to record review_required",
 					"job_id", jobID, "err", rErr)
 			}
-			return nil // not an error — the job stopped intentionally
+			return nil
 		}
 
 		r.logger.Error("jobrunner: pipeline failed — marking job failed",
 			"job_id", jobID, "session_id", sessionID, "err", err)
-		if fErr := r.store.Fail(ctx, jobID, err.Error()); fErr != nil {
+		if fErr := r.store.Fail(ctx, jobID, claimToken, err.Error()); fErr != nil {
 			r.logger.Error("jobrunner: failed to record failure",
 				"job_id", jobID, "err", fErr)
 		}
 		return fmt.Errorf("jobrunner: process %s: %w", jobID, err)
 	}
 
-	if err := r.store.Complete(ctx, jobID); err != nil {
+	if err := r.store.Complete(ctx, jobID, claimToken); err != nil {
 		r.logger.Error("jobrunner: failed to record completion",
 			"job_id", jobID, "err", err)
 		return fmt.Errorf("jobrunner: complete %s: %w", jobID, err)

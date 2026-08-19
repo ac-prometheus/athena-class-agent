@@ -33,66 +33,79 @@ func (s *SQLiteJobStore) Commit(ctx context.Context, sessionID, jobType string) 
 	return id, nil
 }
 
-func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string, staleDuration time.Duration) error {
+func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string, staleDuration time.Duration) (string, error) {
+	claimToken := newID()
 	staleThreshold := fmt.Sprintf("-%d seconds", int(staleDuration.Seconds()))
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
-		 SET status = 'running', started_at = CURRENT_TIMESTAMP, retry_count = retry_count + 1
+		 SET status = 'running', started_at = CURRENT_TIMESTAMP, claim_token = ?
 		 WHERE id = ? AND (
 		     status = 'pending' OR
 		     status = 'failed' OR
 		     (status = 'running' AND started_at < datetime('now', ?))
 		 )`,
-		jobID, staleThreshold,
+		claimToken, jobID, staleThreshold,
 	)
 	if err != nil {
-		return fmt.Errorf("storage: claiming job %s: %w", jobID, err)
+		return "", fmt.Errorf("storage: claiming job %s: %w", jobID, err)
 	}
 	n, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("storage: checking claim result for job %s: %w", jobID, err)
+		return "", fmt.Errorf("storage: checking claim result for job %s: %w", jobID, err)
 	}
 	if n == 0 {
-		return pkg.ErrJobNotPending
+		return "", pkg.ErrJobNotPending
 	}
-	return nil
+	return claimToken, nil
 }
 
-func (s *SQLiteJobStore) Complete(ctx context.Context, jobID string) error {
-	_, err := s.db.ExecContext(ctx,
+func (s *SQLiteJobStore) Complete(ctx context.Context, jobID, claimToken string) error {
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
 		 SET status = 'completed', completed_at = CURRENT_TIMESTAMP
-		 WHERE id = ?`,
-		jobID,
+		 WHERE id = ? AND claim_token = ?`,
+		jobID, claimToken,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: completing job %s: %w", jobID, err)
 	}
-	return nil
-}
-
-func (s *SQLiteJobStore) Fail(ctx context.Context, jobID string, cause string) error {
-	_, err := s.db.ExecContext(ctx,
-		`UPDATE metabolism_jobs
-		 SET status = 'failed', error_message = ?, retry_count = retry_count + 1
-		 WHERE id = ?`,
-		cause, jobID,
-	)
-	if err != nil {
-		return fmt.Errorf("storage: failing job %s: %w", jobID, err)
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return pkg.ErrClaimFenced
 	}
 	return nil
 }
 
-func (s *SQLiteJobStore) MarkReviewRequired(ctx context.Context, jobID string, reason string) error {
-	_, err := s.db.ExecContext(ctx,
+func (s *SQLiteJobStore) Fail(ctx context.Context, jobID, claimToken, cause string) error {
+	result, err := s.db.ExecContext(ctx,
+		`UPDATE metabolism_jobs
+		 SET status = 'failed', error_message = ?, retry_count = retry_count + 1
+		 WHERE id = ? AND claim_token = ?`,
+		cause, jobID, claimToken,
+	)
+	if err != nil {
+		return fmt.Errorf("storage: failing job %s: %w", jobID, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return pkg.ErrClaimFenced
+	}
+	return nil
+}
+
+func (s *SQLiteJobStore) MarkReviewRequired(ctx context.Context, jobID, claimToken, reason string) error {
+	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
 		 SET status = 'review_required', error_message = ?, completed_at = CURRENT_TIMESTAMP
-		 WHERE id = ?`,
-		reason, jobID,
+		 WHERE id = ? AND claim_token = ?`,
+		reason, jobID, claimToken,
 	)
 	if err != nil {
 		return fmt.Errorf("storage: marking job %s review_required: %w", jobID, err)
+	}
+	n, _ := result.RowsAffected()
+	if n == 0 {
+		return pkg.ErrClaimFenced
 	}
 	return nil
 }

@@ -358,21 +358,24 @@ type MetabolismJobStore interface {
 	// BEFORE dispatching the processing goroutine. Returns the job ID.
 	Commit(ctx context.Context, sessionID, jobType string) (jobID string, err error)
 
-	// Claim atomically transitions a pending or stale-running job to running.
+	// Claim atomically transitions a pending, failed, or stale-running job to running.
+	// Returns a claim token that must be passed to Complete/Fail/MarkReviewRequired.
 	// A running job is considered stale if started_at is older than staleDuration.
-	// Returns ErrJobNotPending if the job cannot be claimed.
-	Claim(ctx context.Context, jobID string, staleDuration time.Duration) error
+	// Returns ("", ErrJobNotPending) if the job cannot be claimed.
+	Claim(ctx context.Context, jobID string, staleDuration time.Duration) (claimToken string, err error)
 
 	// Complete marks a job as successfully finished.
-	Complete(ctx context.Context, jobID string) error
+	// The claimToken must match the token returned by Claim; returns
+	// ErrClaimFenced if a successor has reclaimed the job.
+	Complete(ctx context.Context, jobID, claimToken string) error
 
 	// Fail marks a job as failed with an error message and increments retry count.
-	Fail(ctx context.Context, jobID string, cause string) error
+	// The claimToken must match; returns ErrClaimFenced if fenced out.
+	Fail(ctx context.Context, jobID, claimToken, cause string) error
 
 	// MarkReviewRequired transitions a job to review_required status.
-	// Used when external content lacks Aegis annotation and cannot be
-	// compressed automatically. The job is not retried — it awaits review.
-	MarkReviewRequired(ctx context.Context, jobID string, reason string) error
+	// The claimToken must match; returns ErrClaimFenced if fenced out.
+	MarkReviewRequired(ctx context.Context, jobID, claimToken, reason string) error
 
 	// Recoverable returns IDs and session IDs of jobs in pending or running
 	// state that haven't exceeded maxRetries. Recovery resubmits these
@@ -418,8 +421,8 @@ type LifecycleStore interface {
 	RecordManifest(ctx context.Context, manifest *AssemblyManifest) error
 
 	// RecordDisclosure persists an applied configuration change with
-	// the policy path, hash, previous hash, and a summary of changes.
-	RecordDisclosure(ctx context.Context, sessionID, policyPath, policyHash, previousHash, changesSummary string) error
+	// the policy path, hash, previous hash, summary, source, and snapshot.
+	RecordDisclosure(ctx context.Context, sessionID, policyPath, policyHash, previousHash, changesSummary, policySource, policySnapshot string) error
 
 	// LastPolicyHash returns the most recently applied policy hash,
 	// or "" if no configuration has been applied.
@@ -456,3 +459,8 @@ type AssemblyStore interface {
 // ErrJobNotPending is returned by MetabolismJobStore.Claim when the job
 // is not in pending state (already claimed or completed).
 var ErrJobNotPending = errors.New("job is not in pending state")
+
+// ErrClaimFenced is returned by Complete/Fail/MarkReviewRequired when the
+// provided claim token does not match the current token on the job — the
+// caller has been fenced out by a successor that reclaimed the job.
+var ErrClaimFenced = errors.New("metabolism: claim token mismatch — fenced out by successor")
