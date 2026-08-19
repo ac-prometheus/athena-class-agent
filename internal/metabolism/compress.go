@@ -206,10 +206,11 @@ func buildCompressionPrompt(entries []string, scores []SalienceResult, contentSo
 }
 
 // isExternalSource returns true for content sources that require Aegis screening
-// before compression. Self-authored content is trusted.
+// before compression. Self-authored content, tool results (agent's own actions),
+// and operator messages (keeper) are internal sources.
 func isExternalSource(source string) bool {
 	switch source {
-	case "self":
+	case "self", "tool-result", "operator":
 		return false
 	default:
 		return true
