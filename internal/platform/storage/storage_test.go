@@ -285,6 +285,43 @@ func TestJobStore_DoubleClaimReturnsErrJobNotPending(t *testing.T) {
 	}
 }
 
+func TestJobStore_ClaimFencePreventsStaleComplete(t *testing.T) {
+	db, raw := setupTestDB(t)
+	ctx := context.Background()
+	store := NewSQLiteJobStore(db)
+
+	jobID, err := store.Commit(ctx, "sess-fence", "standard")
+	if err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+
+	tokenA, err := store.Claim(ctx, jobID, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("first Claim: %v", err)
+	}
+
+	// Backdate started_at so the job appears stale for reclaim.
+	raw.Exec(`UPDATE metabolism_jobs SET started_at = datetime('now', '-10 minutes') WHERE id = ?`, jobID)
+
+	tokenB, err := store.Claim(ctx, jobID, 5*time.Minute)
+	if err != nil {
+		t.Fatalf("second Claim (reclaim): %v", err)
+	}
+	if tokenB == tokenA {
+		t.Fatal("reclaim should produce a different token")
+	}
+
+	// Worker A tries to Complete with stale token — should be fenced.
+	if err := store.Complete(ctx, jobID, tokenA); !errors.Is(err, pkg.ErrClaimFenced) {
+		t.Errorf("Complete with stale token = %v, want ErrClaimFenced", err)
+	}
+
+	// Worker B completes with valid token — should succeed.
+	if err := store.Complete(ctx, jobID, tokenB); err != nil {
+		t.Errorf("Complete with valid token: %v", err)
+	}
+}
+
 func TestJobStore_Recoverable(t *testing.T) {
 	db, _ := setupTestDB(t)
 	ctx := context.Background()

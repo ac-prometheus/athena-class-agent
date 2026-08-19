@@ -3,6 +3,7 @@ package metabolism
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -24,7 +25,7 @@ import (
 //
 // Schema dependency: experiential_logs.narrative_summary_id column must exist
 // (added by a migration that introduces the T2->T3 back-link column).
-func AtomicT2T3Link(ctx context.Context, db platform.DB, driverName string, narrative *pkg.NarrativeSummary, sourceLogIDs []string) error {
+func AtomicT2T3Link(ctx context.Context, db platform.DB, driverName string, narrative *pkg.NarrativeSummary, sourceLogIDs []string, fenceJobID, fenceToken string) error {
 	if narrative == nil {
 		return fmt.Errorf("metabolism: narrative summary is nil")
 	}
@@ -43,6 +44,21 @@ func AtomicT2T3Link(ctx context.Context, db platform.DB, driverName string, narr
 	}
 	// Rollback is a no-op after Commit, so this is safe as a cleanup path.
 	defer tx.Rollback() //nolint:errcheck
+
+	// Step 0: Verify claim fence if provided — a stale worker must not
+	// write a T3 narrative after being reclaimed by a successor.
+	if fenceJobID != "" && fenceToken != "" {
+		var currentToken sql.NullString
+		err := tx.QueryRowContext(ctx,
+			`SELECT claim_token FROM metabolism_jobs WHERE id = ?`, fenceJobID,
+		).Scan(&currentToken)
+		if err != nil {
+			return fmt.Errorf("metabolism: fence check query: %w", err)
+		}
+		if !currentToken.Valid || currentToken.String != fenceToken {
+			return fmt.Errorf("metabolism: %w", pkg.ErrClaimFenced)
+		}
+	}
 
 	// Step 1: INSERT the T3 narrative summary.
 	beliefJSON := beliefMetaJSON(narrative.Belief)

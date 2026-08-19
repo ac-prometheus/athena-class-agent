@@ -29,3 +29,6 @@ INSERT OR IGNORE INTO configuration_applied_new
 -- Step 3: Drop old table and rename.
 DROP TABLE IF EXISTS configuration_applied;
 ALTER TABLE configuration_applied_new RENAME TO configuration_applied;
+
+-- Step 4: Recreate indexes (idx_configuration_applied_session_id from 009).
+CREATE INDEX IF NOT EXISTS idx_configuration_applied_session_id ON configuration_applied(session_id);

@@ -80,7 +80,7 @@ func (r *JobRunner) Run(ctx context.Context, jobID, sessionID string) error {
 	r.logger.Info("jobrunner: processing",
 		"job_id", jobID, "session_id", sessionID)
 
-	if err := r.pipeline.ProcessSession(ctx, sessionID); err != nil {
+	if err := r.pipeline.ProcessSession(ctx, sessionID, WithClaimFence(jobID, claimToken)); err != nil {
 		if errors.Is(err, ErrReviewRequired) {
 			r.logger.Info("jobrunner: pipeline requires review — marking review_required",
 				"job_id", jobID, "session_id", sessionID)

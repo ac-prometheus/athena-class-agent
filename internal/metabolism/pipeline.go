@@ -10,6 +10,23 @@ import (
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
+// ProcessOption configures a single ProcessSession call.
+type ProcessOption func(*processConfig)
+
+type processConfig struct {
+	claimToken string
+	jobID      string
+}
+
+// WithClaimFence passes the claim token and job ID for fenced T3 writes.
+// If set, the T3 transaction verifies the token still matches before writing.
+func WithClaimFence(jobID, claimToken string) ProcessOption {
+	return func(c *processConfig) {
+		c.claimToken = claimToken
+		c.jobID = jobID
+	}
+}
+
 // Pipeline coordinates post-session metabolism: salience scoring,
 // T2→T3 compression, and (future) dream cycle. Dispatched asynchronously
 // from Session.End() via a durable job record.
@@ -78,7 +95,12 @@ func (p *Pipeline) WithCompression(memStore pkg.MemoryStore, llmFn func(string) 
 // When a ConsolidationStore is wired, UncoveredLogs is used instead of
 // QueryLogs to make retries idempotent — logs already linked to a
 // narrative are skipped, preventing T3 duplicates.
-func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string) error {
+func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string, opts ...ProcessOption) error {
+	var pcfg processConfig
+	for _, opt := range opts {
+		opt(&pcfg)
+	}
+
 	slog.Info("metabolism: starting", "session", sessionID)
 
 	// Load T2 logs. Prefer UncoveredLogs (idempotent on retry) over
@@ -148,7 +170,7 @@ func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string) error {
 				if err := p.consolidation.CommitNarrative(ctx, narrative, sourceLogIDs); err != nil {
 					return fmt.Errorf("metabolism: consolidation store commit failed: %w", err)
 				}
-			} else if err := AtomicT2T3Link(ctx, p.db, p.driverName, narrative, sourceLogIDs); err != nil {
+			} else if err := AtomicT2T3Link(ctx, p.db, p.driverName, narrative, sourceLogIDs, pcfg.jobID, pcfg.claimToken); err != nil {
 				return fmt.Errorf("metabolism: atomic T2-T3 link failed: %w", err)
 			}
 

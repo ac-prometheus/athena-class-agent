@@ -36,15 +36,17 @@ func (s *SQLiteJobStore) Commit(ctx context.Context, sessionID, jobType string) 
 func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string, staleDuration time.Duration) (string, error) {
 	claimToken := newID()
 	staleThreshold := fmt.Sprintf("-%d seconds", int(staleDuration.Seconds()))
+	const maxClaims = 5
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
-		 SET status = 'running', started_at = CURRENT_TIMESTAMP, claim_token = ?
-		 WHERE id = ? AND (
+		 SET status = 'running', started_at = CURRENT_TIMESTAMP,
+		     claim_token = ?, claim_count = claim_count + 1
+		 WHERE id = ? AND claim_count < ? AND (
 		     status = 'pending' OR
 		     status = 'failed' OR
 		     (status = 'running' AND started_at < datetime('now', ?))
 		 )`,
-		claimToken, jobID, staleThreshold,
+		claimToken, jobID, maxClaims, staleThreshold,
 	)
 	if err != nil {
 		return "", fmt.Errorf("storage: claiming job %s: %w", jobID, err)
@@ -71,7 +73,7 @@ func (s *SQLiteJobStore) Complete(ctx context.Context, jobID, claimToken string)
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return pkg.ErrClaimFenced
+		return s.fencedOrNotFound(ctx, jobID)
 	}
 	return nil
 }
@@ -88,7 +90,7 @@ func (s *SQLiteJobStore) Fail(ctx context.Context, jobID, claimToken, cause stri
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return pkg.ErrClaimFenced
+		return s.fencedOrNotFound(ctx, jobID)
 	}
 	return nil
 }
@@ -105,9 +107,18 @@ func (s *SQLiteJobStore) MarkReviewRequired(ctx context.Context, jobID, claimTok
 	}
 	n, _ := result.RowsAffected()
 	if n == 0 {
-		return pkg.ErrClaimFenced
+		return s.fencedOrNotFound(ctx, jobID)
 	}
 	return nil
+}
+
+func (s *SQLiteJobStore) fencedOrNotFound(ctx context.Context, jobID string) error {
+	var exists bool
+	_ = s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM metabolism_jobs WHERE id = ?)", jobID).Scan(&exists)
+	if !exists {
+		return fmt.Errorf("storage: job %s not found", jobID)
+	}
+	return pkg.ErrClaimFenced
 }
 
 func (s *SQLiteJobStore) Recoverable(ctx context.Context, maxRetries int) ([]pkg.RecoverableJob, error) {
