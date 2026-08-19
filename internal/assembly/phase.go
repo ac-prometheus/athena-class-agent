@@ -22,6 +22,12 @@ type PhaseResult struct {
 	Content   string // text block to append to SystemPrompt
 	CharsUsed int    // chars to deduct from remaining budget; 0 = not charged
 
+	// TokenEstimate is the approximate token cost of this phase's output
+	// (CharsUsed / 4 using the standard 4-chars-per-token heuristic).
+	// Set by the assembler after each phase runs; phases may override it if
+	// they have a more accurate estimate. Always 0 when CharsUsed is 0.
+	TokenEstimate int
+
 	// Structured outputs for phases that return more than content.
 	// nil when not applicable. Avoids type-asserting concrete phase types.
 	IdentityDocs    *identity.IdentityDocs    // set by identity phase

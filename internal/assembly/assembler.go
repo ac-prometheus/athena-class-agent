@@ -161,6 +161,7 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 	var phasesRun []string
 	var phasesSkipped []string
 	skipReasons := make(map[string]string)
+	phaseCosts := make(map[string]int) // phase name → token estimate (chars/4)
 
 	for _, phase := range phases {
 		if phase.MinBudget() > 0 && remaining < phase.MinBudget() {
@@ -188,6 +189,19 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 			skipReasons[phase.Name()] = fmt.Sprintf("error: %v", err)
 			continue
 		}
+
+		// Derive token estimate from chars if the phase didn't provide one.
+		// Uses the standard 4-chars-per-token heuristic throughout the assembler.
+		if result.TokenEstimate == 0 && result.CharsUsed > 0 {
+			result.TokenEstimate = (result.CharsUsed + 3) / 4
+		}
+		phaseCosts[phase.Name()] = result.TokenEstimate
+
+		slog.Debug("assembly: phase charged",
+			"phase", phase.Name(),
+			"chars", result.CharsUsed,
+			"tokens_est", result.TokenEstimate,
+		)
 
 		phasesRun = append(phasesRun, phase.Name())
 
@@ -227,6 +241,7 @@ func (a *ContextAssembler) Assemble(ctx context.Context, cfg AssembleConfig) (*A
 		SkipReasons:   skipReasons,
 		BudgetTotal:   budgetChars,
 		BudgetUsed:    budgetChars - remaining,
+		PhaseCosts:    phaseCosts,
 		CreatedAt:     time.Now(),
 	}
 

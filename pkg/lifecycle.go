@@ -253,6 +253,10 @@ type AssemblyManifest struct {
 	SkipReasons   map[string]string `json:"skip_reasons"`
 	BudgetTotal   int               `json:"budget_total"`
 	BudgetUsed    int               `json:"budget_used"`
+	// PhaseCosts records the approximate token cost charged by each phase
+	// (chars consumed / 4; same heuristic as the assembler's overall budget accounting).
+	// Skipped phases are absent. Identity phase is always 0 (never charged).
+	PhaseCosts    map[string]int    `json:"phase_costs,omitempty"`
 	CreatedAt     time.Time         `json:"created_at"`
 }
 
