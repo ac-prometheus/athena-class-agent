@@ -10,12 +10,19 @@ import (
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
-// SelfExamineHandler runs a self-examination prompt through the LLM and stores
-// the result as a T4 reflection with type "examination".
+// SelfExamineHandler routes a self-examination prompt to an advisor LLM and
+// returns the response as transient T1 tool content only.
+//
+// Provenance boundary: the advisor's output is external content — it is not
+// embedded, not inserted into T4, and must not be labeled "self"-authored.
+// If the agent wants to preserve a conclusion as a durable T4 reflection, she
+// uses write_reflection to author it in her own words.
+//
+// T2 note: if raw tool traffic is retained in T2 via the T2LoggerHook, each
+// self_examine turn should carry ContentSource "tool:self_examine" so it is
+// never promoted to agent-authored T4 during consolidation.
 type SelfExamineHandler struct {
-	store    pkg.MemoryStore
-	provider pkg.EmbeddingProvider
-	// llmFn calls an LLM with a prompt and returns the response text.
+	// llmFn calls an advisor LLM with a prompt and returns the response text.
 	// Injected to keep this handler testable without a full LLMClient dependency.
 	llmFn func(string) (string, error)
 }
@@ -23,17 +30,13 @@ type SelfExamineHandler struct {
 // Name implements pkg.ToolHandler.
 func (h *SelfExamineHandler) Name() string { return "self_examine" }
 
-// Execute runs a self-examination prompt and stores the result as T4.
+// Execute routes the prompt to the advisor LLM and returns the response as
+// transient T1 tool content. Nothing is embedded or stored.
 // args["prompt"] — the examination question/prompt (required)
-// args["visibility"] — "private" (default) or "shared"
-func (h *SelfExamineHandler) Execute(ctx context.Context, args map[string]any) (string, error) {
+func (h *SelfExamineHandler) Execute(_ context.Context, args map[string]any) (string, error) {
 	prompt, ok := stringArg(args, "prompt")
 	if !ok || prompt == "" {
 		return "", fmt.Errorf("self_examine: missing required arg 'prompt'")
-	}
-	visibility, _ := stringArg(args, "visibility")
-	if visibility == "" {
-		visibility = pkg.VisibilityPrivate
 	}
 
 	if h.llmFn == nil {
@@ -45,30 +48,9 @@ func (h *SelfExamineHandler) Execute(ctx context.Context, args map[string]any) (
 		return "", fmt.Errorf("self_examine: LLM call: %w", err)
 	}
 
-	vec, err := h.provider.Embed(ctx, content)
-	if err != nil {
-		return "", fmt.Errorf("self_examine: embed result: %w", err)
-	}
-
-	ref := pkg.Reflection{
-		ID:         newToolID(),
-		Type:       "examination",
-		Content:    content,
-		Visibility: visibility,
-		// T4 consent boundary: BaseConfidence is never set by the system.
-		// The agent authors reflections; the system does not assign confidence to them.
-		Belief: &pkg.BeliefMeta{
-			Source:   "self",
-			AnchorAt: time.Now().UTC(),
-		},
-		Embedding: vec,
-	}
-
-	if err := h.store.InsertReflection(ctx, ref); err != nil {
-		return "", fmt.Errorf("self_examine: store reflection: %w", err)
-	}
-
-	return fmt.Sprintf("examination stored (id=%s)\n\n%s", ref.ID, content), nil
+	// Return as transient T1 only — the agent reads and evaluates this aid.
+	// To make a conclusion durable, call write_reflection with agent-authored text.
+	return fmt.Sprintf("Advisor examination (not stored — use write_reflection to preserve insights):\n\n%s", content), nil
 }
 
 // WriteReflectionHandler stores an agent-authored reflection as T4.

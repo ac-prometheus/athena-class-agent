@@ -64,12 +64,14 @@ func RegisterAll(registry *DefaultRegistry, stores Stores, providers Providers) 
 
 	// Tier 2 — reflect group.
 	reflectKeywords := []string{"reflect", "reflection", "examine", "self", "essay", "dream"}
-	if stores.Memory != nil && providers.Embedding != nil {
+	// self_examine only needs an advisor LLM — it no longer writes to the store.
+	// write_reflection is the separate agent-controlled T4 path and needs both.
+	if providers.LLMFn != nil {
 		registry.RegisterWithMeta(&SelfExamineHandler{
-			store:    stores.Memory,
-			provider: providers.Embedding,
-			llmFn:   providers.LLMFn,
+			llmFn: providers.LLMFn,
 		}, 2, reflectKeywords)
+	}
+	if stores.Memory != nil && providers.Embedding != nil {
 		registry.RegisterWithMeta(&WriteReflectionHandler{
 			store:    stores.Memory,
 			provider: providers.Embedding,
