@@ -266,6 +266,8 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 	if cfg.SessionTrigger == "external" {
 		registry = channels.NewChannelRegistry()
 
+		var conditions []daemon.WakeCondition
+
 		if cfg.DiscordToken != "" && cfg.DiscordChannelIDs != "" {
 			ids := strings.Split(cfg.DiscordChannelIDs, ",")
 			for i := range ids {
@@ -277,19 +279,19 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 				PollInterval: time.Duration(cfg.DiscordPollSecs) * time.Second,
 			})
 			registry.Register(discord)
+			conditions = append(conditions, daemon.WakeCondition{Channel: "discord", Pattern: ".*", Priority: 1})
 		}
 
-		cli := channels.NewCLIAdapter()
-		registry.Register(cli)
-
-		conditions := []daemon.WakeCondition{
-			{Channel: "discord", Pattern: ".*", Priority: 1},
-			{Channel: "cli", Pattern: ".*", Priority: 2},
+		if os.Getenv("CLI_CHANNEL") == "true" {
+			cli := channels.NewCLIAdapter()
+			registry.Register(cli)
+			conditions = append(conditions, daemon.WakeCondition{Channel: "cli", Pattern: ".*", Priority: 2})
 		}
+
 		waker = daemon.NewWakeScheduler(conditions)
 
 		if profile == ProfileErsaProduction && len(registry.List()) == 0 {
-			return nil, fmt.Errorf("app: ersa_production with SESSION_TRIGGER=external requires at least one channel (set DISCORD_TOKEN+DISCORD_CHANNEL_IDS)")
+			return nil, fmt.Errorf("app: ersa_production with SESSION_TRIGGER=external requires at least one channel (set DISCORD_TOKEN+DISCORD_CHANNEL_IDS or CLI_CHANNEL=true)")
 		}
 	}
 
