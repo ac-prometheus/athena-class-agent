@@ -177,6 +177,17 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 	assembleCfg.AssemblyStore = r.deps.AssemblyStore
 	assembleCfg.SkipWitnessCheck = r.deps.Config.SkipWitnessCheck
 
+	// Wire memory dependencies into assembly — enables continuity phase (T3 retrieval)
+	// and echo-pool phase (semantic echo retrieval). Bridge is set to the designed
+	// default AbstainRate of 0.20; BridgePolicy on the plan gates whether synthesis fires.
+	if r.deps.MemoryStore != nil {
+		assembleCfg.SetStore(r.deps.MemoryStore)
+		assembleCfg.SetBridge(assembly.DefaultBridgeConfig())
+	}
+	if r.deps.EmbeddingProvider != nil {
+		assembleCfg.SetProvider(r.deps.EmbeddingProvider)
+	}
+
 	// 9. Assemble context.
 	assembled, err := r.assembler.Assemble(ctx, assembleCfg)
 	if err != nil {
@@ -193,9 +204,24 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 	// 10. Create engine with hooks and run the agentic loop.
 	budget := assembly.NewTokenBudget(r.deps.Config.TokenBudget, r.deps.Config.HardFloorTokens)
 	hooks := engine.NewHookPipeline()
+
+	// T2LoggerHook: critical — a failed T2 write is data loss, not an advisory event.
+	// Registered before BudgetMonitor so T2 persistence fires even when budget is tight.
+	if r.deps.MemoryStore != nil {
+		hooks.RegisterCritical(engine.NewT2LoggerHook(r.deps.MemoryStore))
+	}
+
+	// BudgetMonitorHook: advisory — warnings are useful but failure must not halt the session.
 	hooks.Register(engine.NewBudgetMonitorHook(budget))
 
+	// RecordTurn: advisory — updates the session turn counter used in checkpoint writes.
+	hooks.Register(engine.NewFuncHook("record-turn", func(_ context.Context, tr engine.TurnResult) error {
+		sess.RecordTurn(tr.PromptTokens, tr.CompletionTokens)
+		return nil
+	}))
+
 	eng := engine.NewEngine(r.deps.LLM, nil, hooks)
+	eng.WithSessionID(sess.GetID())
 	if r.deps.Gateway != nil {
 		eng.WithAegis(r.deps.Gateway)
 	}

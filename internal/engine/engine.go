@@ -78,10 +78,11 @@ type LoopResult struct {
 // Engine drives the multi-turn agentic loop with parallel tool execution and
 // Aegis hook integration. It coexists with the legacy Loop — Phase 4 removes Loop.
 type Engine struct {
-	client   pkg.LLMClient
-	registry pkg.ToolRegistry
-	hooks    *HookPipeline
-	aegis    pkg.ContentGateway
+	client    pkg.LLMClient
+	registry  pkg.ToolRegistry
+	hooks     *HookPipeline
+	aegis     pkg.ContentGateway
+	sessionID string // propagated into every TurnResult for hook consumption
 }
 
 // NewEngine creates an Engine.
@@ -96,6 +97,13 @@ func NewEngine(client pkg.LLMClient, registry pkg.ToolRegistry, hooks *HookPipel
 // WithAegis sets the Aegis content gateway for inbound/outbound screening.
 func (e *Engine) WithAegis(gw pkg.ContentGateway) {
 	e.aegis = gw
+}
+
+// WithSessionID binds a session ID to the engine so that TurnResults carry it
+// through to hooks (e.g. T2LoggerHook needs it to key experiential log entries).
+func (e *Engine) WithSessionID(id string) *Engine {
+	e.sessionID = id
+	return e
 }
 
 // RunLoop executes the multi-turn agentic loop over req.
@@ -501,6 +509,7 @@ func (e *Engine) availableToolNames() string {
 
 func (e *Engine) buildTurnResult(turnNumber int, resp *pkg.CompletionResponse) TurnResult {
 	return TurnResult{
+		SessionID:        e.sessionID,
 		TurnNumber:       turnNumber,
 		Content:          resp.TextContent(),
 		PromptTokens:     resp.PromptTokens,

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 )
 
@@ -36,7 +37,12 @@ type hookEntry struct {
 }
 
 // HookPipeline runs registered hooks in order after each turn.
+// mu guards the hooks slice against concurrent Register and RunAll calls
+// (HARN-4: tool calls execute in parallel, and both the registration path and
+// the dispatch path must be race-free even if one session's hooks are somehow
+// shared — e.g. across test goroutines).
 type HookPipeline struct {
+	mu    sync.Mutex
 	hooks []hookEntry
 }
 
@@ -49,6 +55,8 @@ func NewHookPipeline() *HookPipeline {
 // Errors from advisory hooks are logged as warnings; execution continues.
 // Hooks run in registration order.
 func (p *HookPipeline) Register(h TurnHook) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.hooks = append(p.hooks, hookEntry{hook: h, critical: false})
 }
 
@@ -57,6 +65,8 @@ func (p *HookPipeline) Register(h TurnHook) {
 // skips any remaining hooks. Use for hooks whose failure should abort the
 // post-turn pipeline (e.g. Tier-2 persistence).
 func (p *HookPipeline) RegisterCritical(h TurnHook) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.hooks = append(p.hooks, hookEntry{hook: h, critical: true})
 }
 
@@ -64,7 +74,12 @@ func (p *HookPipeline) RegisterCritical(h TurnHook) {
 // Critical hook errors are returned immediately (remaining hooks are skipped).
 // Advisory hook errors are logged as warnings and execution continues.
 func (p *HookPipeline) RunAll(ctx context.Context, turn TurnResult) error {
-	for _, entry := range p.hooks {
+	p.mu.Lock()
+	entries := make([]hookEntry, len(p.hooks))
+	copy(entries, p.hooks)
+	p.mu.Unlock()
+
+	for _, entry := range entries {
 		if err := entry.hook.Run(ctx, turn); err != nil {
 			if entry.critical {
 				return err
@@ -78,3 +93,19 @@ func (p *HookPipeline) RunAll(ctx context.Context, turn TurnResult) error {
 	}
 	return nil
 }
+
+// FuncHook adapts a plain function into a TurnHook for inline registration.
+// Useful for lightweight per-session hooks (e.g. sess.RecordTurn callbacks)
+// that don't warrant a named struct.
+type FuncHook struct {
+	name string
+	fn   func(ctx context.Context, turn TurnResult) error
+}
+
+// NewFuncHook creates a TurnHook backed by fn.
+func NewFuncHook(name string, fn func(ctx context.Context, turn TurnResult) error) *FuncHook {
+	return &FuncHook{name: name, fn: fn}
+}
+
+func (h *FuncHook) Name() string                                    { return h.name }
+func (h *FuncHook) Run(ctx context.Context, turn TurnResult) error { return h.fn(ctx, turn) }

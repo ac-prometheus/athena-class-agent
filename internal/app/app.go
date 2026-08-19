@@ -214,16 +214,21 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 	}
 
 	// Metabolism stack: Pipeline → JobRunner → Supervisor.
-	// The pipeline is created with nil llmFn (T2→T3 compression disabled until
-	// the LLM wrapper and embedding provider are wired). The Supervisor provides
-	// bounded-concurrency dispatch for SessionRunner.
+	// The pipeline is created with a real llmFn wrapping deps.LLM so T2→T3 compression
+	// can fire when both MemoryStore and EmbeddingProvider are available. The Supervisor
+	// provides bounded-concurrency dispatch for SessionRunner.
 	var supervisor *metabolism.Supervisor
 	var jobRunner *metabolism.JobRunner
 	if deps.JobStore != nil && deps.DB != nil {
+		// compressionLLMFn wraps the session LLM client for post-session metabolism.
+		// Metabolism runs after the session ends (background job), so context.Background()
+		// is the correct root — there is no active request context at that point.
+		compressionLLMFn := makeLLMFn(deps.LLM)
+
 		pipeline := metabolism.NewPipeline(
 			nil,                    // T2QueryStore — nil; ConsolidationStore takes priority when set
 			deps.Gateway,           // Aegis — nil for development; non-nil for production
-			nil,                    // llmFn — disabled until embedding provider is wired
+			compressionLLMFn,       // T2→T3 compression LLM
 			deps.EmbeddingProvider, // nil for development
 			deps.DB,
 			driverName,
@@ -232,7 +237,7 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 			pipeline.WithConsolidation(deps.ConsolidationStore)
 		}
 		if deps.MemoryStore != nil {
-			pipeline.WithCompression(deps.MemoryStore, nil, deps.EmbeddingProvider)
+			pipeline.WithCompression(deps.MemoryStore, compressionLLMFn, deps.EmbeddingProvider)
 		}
 		jobRunner = metabolism.NewJobRunner(deps.JobStore, pipeline, nil)
 		supervisor = metabolism.NewSupervisor(jobRunner, 2, nil)
@@ -353,4 +358,23 @@ func (a *App) Close() error {
 // Both SessionRunner and Phase1Runner satisfy this interface.
 type SessionRunnerIface interface {
 	RunSession(ctx context.Context, trigger pkg.SessionTrigger) error
+}
+
+// makeLLMFn wraps an LLMClient into the func(string)(string,error) signature
+// that the metabolism pipeline's T2→T3 compression expects.
+//
+// Compression runs in a background job after the session ends, so
+// context.Background() is appropriate — there is no active request context.
+// MaxTokens of 4096 matches Aurora's compression budget.
+func makeLLMFn(client pkg.LLMClient) func(string) (string, error) {
+	return func(prompt string) (string, error) {
+		resp, err := client.Complete(context.Background(), pkg.CompletionRequest{
+			Messages:  []pkg.Message{{Role: "user", Content: prompt}},
+			MaxTokens: 4096,
+		})
+		if err != nil {
+			return "", fmt.Errorf("compression LLM call: %w", err)
+		}
+		return resp.TextContent(), nil
+	}
 }

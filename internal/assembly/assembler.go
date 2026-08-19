@@ -94,6 +94,37 @@ func MinimalAssembleConfig() AssembleConfig {
 	return AssembleConfig{}
 }
 
+// SetStore wires the MemoryStore dependency into the config.
+// Required for continuity phase (T3 narrative retrieval) and echo-pool phase.
+// Returns the receiver pointer for method chaining.
+func (c *AssembleConfig) SetStore(store pkg.MemoryStore) *AssembleConfig {
+	c.store = store
+	return c
+}
+
+// SetProvider wires the EmbeddingProvider into the config.
+// Required for echo-pool phase (semantic echo retrieval).
+// Returns the receiver pointer for method chaining.
+func (c *AssembleConfig) SetProvider(provider pkg.EmbeddingProvider) *AssembleConfig {
+	c.provider = provider
+	return c
+}
+
+// SetBridge wires the BridgeConfig for orientation bridge synthesis.
+// Only meaningful when the lifecycle plan's BridgePolicy is BridgeAutoWithAbstention.
+// Returns the receiver pointer for method chaining.
+func (c *AssembleConfig) SetBridge(bridge awareness.BridgeConfig) *AssembleConfig {
+	c.bridge = bridge
+	return c
+}
+
+// DefaultBridgeConfig returns the recommended bridge configuration for production sessions.
+// AbstainRate of 0.20 means roughly one in five sessions skips bridge synthesis,
+// preventing it from becoming a mechanical ritual (matches Aurora's design).
+func DefaultBridgeConfig() awareness.BridgeConfig {
+	return awareness.BridgeConfig{AbstainRate: 0.20}
+}
+
 // NewContextAssembler creates an assembler with the given identity directory and token budget.
 // The phase registry is initialised via DefaultPhases; callers may replace it by setting
 // the phases field directly if custom assembly is needed.
