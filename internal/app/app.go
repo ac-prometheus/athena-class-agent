@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 
@@ -21,6 +22,7 @@ import (
 // Option values; production code calls NewApp with no options.
 type App struct {
 	Config       *platform.Config
+	Profile      RuntimeProfile
 	Dependencies *Dependencies
 	Runner       *SessionRunner
 	Supervisor   *metabolism.Supervisor
@@ -185,6 +187,7 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 
 	return &App{
 		Config:       cfg,
+		Profile:      profile,
 		Dependencies: deps,
 		Runner:       runner,
 		Supervisor:   supervisor,
@@ -195,8 +198,26 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 // Run starts the daemon and blocks until ctx is cancelled or the daemon
 // stops naturally. The context is propagated through to RunSession so
 // that SIGINT/SIGTERM cancel in-flight sessions cleanly.
+//
+// For ProfileConnectivityTest, Run returns immediately after construction
+// succeeds — no session is started.
 func (a *App) Run(ctx context.Context) error {
+	if a.Profile == ProfileConnectivityTest {
+		slog.Info("app: connectivity test passed — all required dependencies constructed")
+		return nil
+	}
 	return a.Daemon.Run(ctx)
+}
+
+// Close releases resources owned by the App — database connections,
+// background workers, etc. Safe to call multiple times.
+func (a *App) Close() error {
+	if a.Dependencies != nil && a.Dependencies.DB != nil {
+		if closer, ok := a.Dependencies.DB.(io.Closer); ok {
+			return closer.Close()
+		}
+	}
+	return nil
 }
 
 // SessionRunnerIface is the session-runner contract that the daemon

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/app"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
@@ -43,5 +45,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("initialization failed: %w", err)
 	}
-	return application.Run(context.Background())
+	defer application.Close()
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	return application.Run(ctx)
 }

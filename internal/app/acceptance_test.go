@@ -56,9 +56,6 @@ func acceptanceDB(t *testing.T) (*sql.DB, platform.DB) {
 				continue
 			}
 			if _, err := db.Exec(stmt); err != nil {
-				if strings.Contains(strings.ToUpper(stmt), "ALTER TABLE") {
-					continue
-				}
 				t.Fatalf("migration %s stmt %q: %v", filepath.Base(f), truncateStr(stmt, 80), err)
 			}
 		}

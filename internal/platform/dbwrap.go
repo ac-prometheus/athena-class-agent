@@ -60,6 +60,8 @@ func (s *sqlDB) QueryRowContext(ctx context.Context, query string, args ...any) 
 	return s.db.QueryRowContext(ctx, query, args...)
 }
 
+func (s *sqlDB) Close() error { return s.db.Close() }
+
 // ---------------------------------------------------------------------------
 // pgxDB wraps *pgxpool.Pool to implement platform.DB.
 // pgx returns its own pgx.Rows / pgx.Row types; we adapt them here.
@@ -89,6 +91,8 @@ func (p *pgxDB) ExecContext(ctx context.Context, query string, args ...any) (sql
 func (p *pgxDB) QueryRowContext(ctx context.Context, query string, args ...any) Row {
 	return &pgxRowAdapter{row: p.pool.QueryRow(ctx, query, args...)}
 }
+
+func (p *pgxDB) Close() error { p.pool.Close(); return nil }
 
 // pgxRowsAdapter adapts pgx.Rows to platform.Rows.
 type pgxRowsAdapter struct {
