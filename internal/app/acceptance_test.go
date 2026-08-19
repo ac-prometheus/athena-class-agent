@@ -948,3 +948,149 @@ func (h *selfExamineStub) Execute(_ context.Context, args map[string]any) (strin
 	}
 	return fmt.Sprintf("Advisor examination (not stored):\n\n%s", content), nil
 }
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 1: Ordinary Episodic Return (ersa_production)
+// ---------------------------------------------------------------------------
+
+func TestAcceptance_Production_OrdinaryEpisodicReturn(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	application := acceptanceProductionApp(t, rawDB, pdb)
+
+	err := application.Runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
+	if err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+
+	if application.Supervisor != nil {
+		application.Supervisor.Drain(5 * time.Second)
+	}
+
+	planCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM lifecycle_plans`)
+	if planCount == 0 {
+		t.Error("expected at least one lifecycle_plans row")
+	}
+	manifestCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM assembly_manifests`)
+	if manifestCount == 0 {
+		t.Error("expected at least one assembly_manifests row")
+	}
+	cpState := queryScalar[string](t, rawDB,
+		`SELECT state FROM session_checkpoints ORDER BY created_at DESC LIMIT 1`)
+	if cpState != "completed" {
+		t.Errorf("checkpoint state = %q, want %q", cpState, "completed")
+	}
+	jobCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM metabolism_jobs`)
+	if jobCount == 0 {
+		t.Error("expected at least one metabolism_jobs row")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 2: Metabolism Interruption Recovery (ersa_production)
+// ---------------------------------------------------------------------------
+
+func TestAcceptance_Production_MetabolismInterruptionRecovery(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+
+	_, err := rawDB.Exec(
+		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, started_at, created_at)
+		 VALUES ('stale-prod-job', 'session-crashed-prod', 'running', 'standard',
+		         datetime('now', '-10 minutes'), datetime('now', '-10 minutes'))`,
+	)
+	if err != nil {
+		t.Fatalf("insert stale running job: %v", err)
+	}
+
+	application := acceptanceProductionApp(t, rawDB, pdb)
+	ctx := context.Background()
+
+	n, err := application.Supervisor.Recover(ctx, 3)
+	if err != nil {
+		t.Fatalf("Supervisor.Recover: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 recovered job, got %d", n)
+	}
+
+	application.Supervisor.Drain(5 * time.Second)
+
+	status := queryScalar[string](t, rawDB,
+		`SELECT status FROM metabolism_jobs WHERE id = 'stale-prod-job'`)
+	if status != "completed" && status != "failed" {
+		t.Errorf("recovered job status = %q, want completed or failed (honest outcome)", status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 3: Wake Before Metabolism Completion (ersa_production)
+// ---------------------------------------------------------------------------
+
+func TestAcceptance_Production_WakeBeforeMetabolismCompletion(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+
+	_, err := rawDB.Exec(
+		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, created_at)
+		 VALUES ('prior-prod-pending', 'session-prior-prod', 'pending', 'standard', CURRENT_TIMESTAMP)`,
+	)
+	if err != nil {
+		t.Fatalf("insert prior pending job: %v", err)
+	}
+
+	application := acceptanceProductionApp(t, rawDB, pdb)
+	ctx := context.Background()
+
+	if err := application.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
+		t.Fatalf("RunSession blocked by prior pending job: %v", err)
+	}
+
+	if _, err := application.Supervisor.Recover(ctx, 3); err != nil {
+		t.Fatalf("Supervisor.Recover: %v", err)
+	}
+
+	application.Supervisor.Drain(5 * time.Second)
+
+	priorStatus := queryScalar[string](t, rawDB,
+		`SELECT status FROM metabolism_jobs WHERE id = 'prior-prod-pending'`)
+	if priorStatus != "completed" && priorStatus != "failed" {
+		t.Errorf("prior pending job status = %q, want completed or failed", priorStatus)
+	}
+
+	jobCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM metabolism_jobs`)
+	if jobCount < 2 {
+		t.Errorf("expected >= 2 metabolism_jobs (prior + new session), got %d", jobCount)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 4: Configuration Change Disclosure (ersa_production)
+// ---------------------------------------------------------------------------
+
+func TestAcceptance_Production_ConfigurationChangeDisclosure(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	application := acceptanceProductionApp(t, rawDB, pdb)
+
+	policyJSON := `{"temporal_mode":"episodic","bridge_policy":"agent_requested","metabolism_policy":"standard","assembly_profile":"full"}`
+	if err := os.WriteFile(filepath.Join(application.Config.WorkspaceDir, "lifecycle.json"), []byte(policyJSON), 0644); err != nil {
+		t.Fatalf("write lifecycle.json: %v", err)
+	}
+
+	err := application.Runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
+	if err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+
+	if application.Supervisor != nil {
+		application.Supervisor.Drain(5 * time.Second)
+	}
+
+	disclosureCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM configuration_applied`)
+	if disclosureCount == 0 {
+		t.Error("expected at least one configuration_applied row after policy change")
+	}
+
+	policyHash := queryScalar[string](t, rawDB,
+		`SELECT policy_hash FROM configuration_applied ORDER BY applied_at DESC LIMIT 1`)
+	if policyHash == "" {
+		t.Error("policy_hash should be non-empty for a valid policy")
+	}
+}
