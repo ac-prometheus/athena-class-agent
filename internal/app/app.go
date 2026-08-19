@@ -6,8 +6,11 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
+	"github.com/ac-prometheus/athena-class-agent/internal/channels"
 	"github.com/ac-prometheus/athena-class-agent/internal/daemon"
 	"github.com/ac-prometheus/athena-class-agent/internal/engine"
 	"github.com/ac-prometheus/athena-class-agent/internal/metabolism"
@@ -172,6 +175,40 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 		sessionRunner = runner
 	}
 
+	// Channel registry — construct adapters from config when trigger is external.
+	var registry *channels.ChannelRegistry
+	var waker *daemon.WakeScheduler
+
+	if cfg.SessionTrigger == "external" {
+		registry = channels.NewChannelRegistry()
+
+		if cfg.DiscordToken != "" && cfg.DiscordChannelIDs != "" {
+			ids := strings.Split(cfg.DiscordChannelIDs, ",")
+			for i := range ids {
+				ids[i] = strings.TrimSpace(ids[i])
+			}
+			discord := channels.NewDiscordAdapter(channels.DiscordConfig{
+				Token:        cfg.DiscordToken,
+				ChannelIDs:   ids,
+				PollInterval: time.Duration(cfg.DiscordPollSecs) * time.Second,
+			})
+			registry.Register(discord)
+		}
+
+		cli := channels.NewCLIAdapter()
+		registry.Register(cli)
+
+		conditions := []daemon.WakeCondition{
+			{Channel: "discord", Pattern: ".*", Priority: 1},
+			{Channel: "cli", Pattern: ".*", Priority: 2},
+		}
+		waker = daemon.NewWakeScheduler(conditions)
+
+		if profile == ProfileErsaProduction && len(registry.List()) == 0 {
+			return nil, fmt.Errorf("app: ersa_production with SESSION_TRIGGER=external requires at least one channel (set DISCORD_TOKEN+DISCORD_CHANNEL_IDS)")
+		}
+	}
+
 	// Daemon — orchestrates session wake/sleep and channel event dispatch.
 	d := daemon.New(daemon.Config{
 		AgentName:      cfg.AgentName,
@@ -183,6 +220,9 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 	}
 	if supervisor != nil {
 		d.WithSupervisor(supervisor)
+	}
+	if registry != nil && waker != nil {
+		d.WithChannels(registry, deps.Gateway, waker)
 	}
 
 	return &App{
@@ -203,7 +243,14 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 // succeeds — no session is started.
 func (a *App) Run(ctx context.Context) error {
 	if a.Profile == ProfileConnectivityTest {
-		slog.Info("app: connectivity test passed — all required dependencies constructed")
+		_, err := a.Dependencies.LLM.Complete(ctx, pkg.CompletionRequest{
+			Messages:  []pkg.Message{{Role: "user", Content: "ping"}},
+			MaxTokens: 1,
+		})
+		if err != nil {
+			return fmt.Errorf("app: connectivity test — LLM unreachable: %w", err)
+		}
+		slog.Info("app: connectivity test passed — DB and LLM verified")
 		return nil
 	}
 	return a.Daemon.Run(ctx)

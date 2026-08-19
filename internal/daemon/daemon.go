@@ -199,11 +199,12 @@ func (d *Daemon) handleEvent(ctx context.Context, ev channels.InboundEvent, inba
 	slog.Info("daemon: wake condition met", "reason", wakeReason, "sender", ev.SenderName)
 
 	trigger := pkg.SessionTrigger{
-		WakeReason:     wakeReason,
-		InboundContent: string(annotated.Normalized),
-		InboundSender:  ev.SenderName,
-		InboundChannel: ev.Channel,
-		InbandNotes:    inbandNotes,
+		WakeReason:      wakeReason,
+		InboundContent:  string(annotated.Normalized),
+		InboundSender:   ev.SenderName,
+		InboundChannel:  ev.Channel,
+		InbandNotes:     inbandNotes,
+		AegisAnnotation: &annotated.Annotation,
 	}
 	if err := d.runner.RunSession(ctx, trigger); err != nil {
 		slog.Error("daemon: session error", "err", err)

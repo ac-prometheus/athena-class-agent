@@ -76,6 +76,11 @@ type Config struct {
 	// Default 10 minutes; read from LLM_REQUEST_TIMEOUT (e.g. "10m", "600s").
 	LLMRequestTimeout time.Duration
 
+	// Channels
+	DiscordToken      string
+	DiscordChannelIDs string // comma-separated channel IDs
+	DiscordPollSecs   int
+
 	// Aegis
 	AegisTrustSkepticalPrior float64
 	AegisTrustRampN          int
@@ -125,6 +130,9 @@ func Load() (*Config, error) {
 		SandboxUser:         envStr("SANDBOX_USER", ""),
 		RuntimeDir:          envStr("RUNTIME_DIR", "./run"),
 		AdvisorConfigPath:   envStr("ADVISOR_CONFIG", ""),
+		DiscordToken:              envStr("DISCORD_TOKEN", ""),
+		DiscordChannelIDs:         envStr("DISCORD_CHANNEL_IDS", ""),
+		DiscordPollSecs:           envInt("DISCORD_POLL_SECONDS", 30),
 		LLMRequestTimeout:         envDuration("LLM_REQUEST_TIMEOUT", 10*time.Minute),
 		SkipWitnessCheck:          envBool("SKIP_WITNESS_CHECK", false),
 		AegisTrustSkepticalPrior:  envFloat("AEGIS_TRUST_SKEPTICAL_PRIOR", 0.40),

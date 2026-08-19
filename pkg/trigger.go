@@ -23,4 +23,8 @@ type SessionTrigger struct {
 	// (e.g. interrupted-session recovery messages). They are separate from the
 	// inbound event content and are always included regardless of wake cause.
 	InbandNotes []string
+
+	// AegisAnnotation is the Aegis screening result from the inbound event.
+	// Nil for heartbeat/scheduled wakes. Carried through to T2 for provenance.
+	AegisAnnotation *AegisAnnotation
 }
