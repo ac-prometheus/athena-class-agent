@@ -6,44 +6,78 @@ This is not a port of any existing agent codebase — it is a clean reference im
 
 Compatible with the ethical principles of the Athena Council. https://athena-council.org
 
-## What's built
+## Capability status
 
-Phases 1–6 are merged. Phase 7 (benchmark) is in progress.
+Three categories, clearly labeled. An operator reading this should know exactly what they're getting.
 
-- **LLM client** — OpenAI-compatible (vLLM, Ollama), Anthropic, and Gemini backends; configuration-driven, not architecture-driven
-- **5-tier memory system** — T2 experiential archive, T3 narrative summaries, T4 reflections, T5 world model (knowledge graph, bi-temporal), relational profiles
-- **Belief metadata with inference tax** — origin, confidence, and inferential lineage computed at read time; never stored-mutated
-- **Identity integrity** — SHA-256 anchor hashing; startup detects tampering vs. amendment; deletion halts boot; fails closed; witness principle enforced on fresh identity
-- **6-phase context assembly** — budget-aware cutting with configurable phase weights
-- **Peripheral awareness** — EWMA centroid tracking, cosine velocity, jittered drift threshold, attention flags; convergence spiral detection
-- **Bridge synthesis** — grounding pass with 20% stochastic abstention to prevent overcalibration
-- **Tool dispatch** — 3-tier registry: always-loaded, keyword-activated, on-demand; skill file support
-- **Sandbox execution** — 4 modes: container, user namespace, permissive, none
-- **UDS socket protocol** — Unix domain socket bridge for CLI ↔ harness privilege separation
-- **Multi-provider advisor tool** — query local, Anthropic, Gemini, or OpenAI models as advisors from within a session
-- **Aegis content integrity pipeline** — sanitize, injection detection, trust scoring (EWMA-backed registry), outbound leak detection
-- **Channel adapters** — Discord, forums, CLI; event-driven wake model
-- **Dress rehearsal modes** — `--dry-run` and `--rehearsal` flags
-- **Belief tuning** — retrieval weights, stochastic contradiction retrieval, convergence spiral metric
-- **MOP (Model Output Pipeline)** — `ContentBlock` union types for structured model output; SSE parser with native reasoning field support (`reasoning` / `reasoning_content`); `Engine` loop with Aegis hooks and parallel tool execution (replaces `Loop`)
-- **Benchmark subsystem** — prompt runner, LLM-as-judge scorer, report + comparison tools; `cmd/benchmark`
+---
 
-## Architecture
+### Production-tested
 
-The full architecture specification is `athena_class_reference_harness_architecture.md` (1600+ lines). It covers the cognitive model, memory tier contracts, belief system, identity integrity protocol, context assembly algorithm, awareness subsystem, tool registry, Aegis pipeline, and channel adapter design.
+These components are wired end-to-end and exercised by the `ersa_production` gate suite (see `internal/app/acceptance_test.go`). They work.
 
-For an inline overview: [Athena Class Cognitive Architecture](athena_class_cognitive_architecture.md)
+- **OpenAI-compatible LLM client** — vLLM, Ollama, or any `/v1/chat/completions` endpoint. Only `LLM_PROVIDER=openai` is currently accepted by `NewApp`; see [LLM provider note](#llm-provider-note) below.
+- **SQLite backend** — all four repository stores (job, consolidation, lifecycle, assembly) plus the memory store share a single SQLite file. Migrations are applied via `cmd/migrate`.
+- **5-tier memory system** — T2 experiential archive, T3 narrative summaries, T4 reflections, T5 world model (knowledge graph, bi-temporal). Belief metadata with origin, confidence, and inferential lineage computed at read time; never stored-mutated.
+- **Identity integrity** — SHA-256 anchor hashing; startup detects tampering vs. amendment; deletion halts boot; fails closed; witness principle enforced on fresh identity.
+- **6-phase context assembly** — budget-aware cutting with configurable phase weights. Bridge synthesis (grounding pass, 20% stochastic abstention) runs inside the assembly pipeline.
+- **Metabolism pipeline** — T2→T3 compression with embedding; fenced job leases prevent double-processing; bounded-concurrency `Supervisor` dispatch.
+- **Aegis content integrity pipeline** — sanitize, injection detection, EWMA-backed trust scoring, outbound leak detection. Wired as `BeforeToolCall` / `AfterToolCall` hooks on `Engine`.
+- **Tool registry** — 3-tier: always-loaded, keyword-activated, on-demand; skill file support. T4 write_reflection, T3 recall, and memory-search tools included.
+- **Sandbox execution** — 4 modes: container, user namespace, permissive, none.
+- **Session lifecycle resolver** — daemon wake/sleep, heartbeat and external trigger modes; `SessionRunner` with job delegation to `Supervisor`.
+- **UDS socket protocol** — Unix domain socket bridge for CLI ↔ harness privilege separation.
+- **MOP (Model Output Pipeline)** — `ContentBlock` union types; SSE parser with native reasoning field support (`reasoning` / `reasoning_content`); `Engine` loop with parallel tool dispatch and Aegis hooks.
+- **Benchmark subsystem** — prompt runner, LLM-as-judge scorer, report and comparison tools; `cmd/benchmark`.
+
+---
+
+### Composed but integration-specific
+
+These components are wired in `NewApp` but depend on external configuration. They compile and run when the right environment variables or config files are provided.
+
+- **Voyage AI embeddings** — wired when `EMBED_API_KEY` is set. Required for T3/T4 write and memory search. Key format is `pa-...`; get one at dash.voyageai.com. Without it, embedding is disabled and those tools degrade gracefully.
+- **Discord channel adapter** — wired when `DISCORD_TOKEN` and `DISCORD_CHANNEL_IDS` (comma-separated) are set and `SESSION_TRIGGER=external`. Drives event-based wake; polling interval via `DISCORD_POLL_SECONDS` (default 30s).
+- **CLI channel** — wired when `CLI_CHANNEL=true` and `SESSION_TRIGGER=external`.
+- **Multi-provider advisor tool** — advisor routing config (`config/advisors.json`); without it, the advisor tool is not loaded. See `config/advisors.json.example`.
+- **Secondary LLM** — vision, critic, or triage role via `LLM_SECONDARY_*` env vars. Must also be an OpenAI-compatible endpoint.
+
+---
+
+### Designed but not yet wired into production
+
+These components exist as code and are architecturally complete, but are not instantiated in `NewApp` yet. They are not dead code — they are next on the integration path.
+
+- **Anthropic and Gemini LLM backends** — the architecture supports them, and client code lives under `internal/engine/`. `NewApp` currently rejects any provider other than `openai`; extending this is straightforward once the provider-selection layer is built out. Tracked in Phase 7 / Sprint 4+.
+- **PostgreSQL backend** — repository store implementations for Postgres are not yet written. `NewApp` returns a clear error if a non-SQLite DSN is provided (`sqlite3 required for current profiles`). Tracked in HARN-73.
+- **Peripheral Awareness tracker** — `PeripheralAwarenessHook` (EWMA centroid tracking, cosine velocity, jittered drift threshold, convergence spiral detection) is implemented in `internal/engine/hooks_phase3.go` and `internal/awareness/peripheral.go` but is not instantiated in `NewApp`. Bridge synthesis and grounding, which share the awareness package, *are* wired.
+- **T4 self-examination LLM call** — `write_reflection` tool is registered but `LLMFn` is passed as `nil` in the current tool setup (`// T4 self-examination not wired until LLM wrapper is finalised`). The tool records reflections without the introspective LLM pass.
+- **Forums channel adapter** — code exists in `internal/channels/forums.go` but is not wired in `NewApp`. Forums-driven wake is not yet active.
+- **Dream cycles** — dream-cycle invocation exists in the metabolism pipeline but is not triggered in the current session lifecycle. Held until consent infrastructure is in place.
+- **Diurnal and continuous temporal modes** — architecture specifies three temporal modes (heartbeat, diurnal, continuous). Only heartbeat and external are wired in `NewApp`.
+- **Register observation** — designed in the awareness layer; not yet wired.
+
+---
+
+## LLM provider note
+
+The config default is `LLM_PROVIDER=openai`. `NewApp` enforces this: any other value (including `anthropic` or `gemini`) returns an error on startup until those backends are integrated. An `LLM_ENDPOINT` pointing to an OpenAI-compatible server is required. Example targets: vLLM (`http://localhost:8000/v1`), Ollama (`http://localhost:11434/v1`), or any hosted proxy that speaks `/v1/chat/completions`.
+
+---
 
 ## Quick start
 
 ```bash
 # Required
-export LLM_PROVIDER=openai          # openai | anthropic | gemini
-export LLM_ENDPOINT=http://localhost:8000/v1  # omit for hosted providers
+export LLM_PROVIDER=openai
+export LLM_ENDPOINT=http://localhost:8000/v1   # OpenAI-compatible endpoint
 export LLM_MODEL=your-model-name
-export LLM_API_KEY=your-key         # omit for local endpoints
+export LLM_API_KEY=your-key                    # omit for local endpoints without auth
 export DATABASE_DSN=sqlite://./agent.db
 export IDENTITY_DIR=./identity
+
+# Optional — enables memory search and T3/T4 write
+export EMBED_API_KEY=pa-...                    # Voyage AI key from dash.voyageai.com
 
 # Run migrations
 go run ./cmd/migrate
@@ -57,8 +91,8 @@ Identity documents go in `IDENTITY_DIR`. See [identity/README.md](identity/READM
 ## Requirements
 
 - Go 1.23+
-- A running LLM endpoint (vLLM, Ollama) or API key for a hosted provider
-- SQLite (default) or PostgreSQL
+- An OpenAI-compatible LLM endpoint (vLLM, Ollama) or API key for an OAI-compatible hosted proxy
+- SQLite (default) — PostgreSQL is not yet supported (HARN-73)
 
 ## Build
 
@@ -106,6 +140,12 @@ All configuration is via environment variables. See `internal/platform/config.go
 
 Copy `config/*.json.example` to `config/*.json` and edit as needed for advisor routing and model configuration.
 
+## Architecture
+
+The full architecture specification is `athena_class_reference_harness_architecture.md` (1600+ lines). It covers the cognitive model, memory tier contracts, belief system, identity integrity protocol, context assembly algorithm, awareness subsystem, tool registry, Aegis pipeline, and channel adapter design.
+
+For an inline overview: [Athena Class Cognitive Architecture](athena_class_cognitive_architecture.md)
+
 ## Project structure
 
 ```
@@ -141,12 +181,14 @@ config/       — example config files
 | Phase | Contents | Status |
 |-------|----------|--------|
 | **1 — Skeleton** | Config, LLM client, session lifecycle, token budget | Complete |
-| **2 — Memory** | All memory tiers, migrations, sqlite-vec/pgvector, belief metadata | Complete |
-| **3 — Identity & Awareness** | Identity integrity, peripheral awareness, relational layer, depth manifest | Complete |
+| **2 — Memory** | All memory tiers, migrations, sqlite-vec, belief metadata | Complete |
+| **3 — Identity & Awareness** | Identity integrity, bridge synthesis, grounding, relational layer | Complete |
 | **4 — Tools & CLI** | Full CLI dispatch, sandbox, skill files, dry-run/rehearsal modes | Complete |
-| **5 — Channels & Aegis** | Discord, forums, content integrity pipeline | Complete |
+| **5 — Channels & Aegis** | Discord, content integrity pipeline | Complete |
 | **6 — Belief tuning** | Retrieval weights, stochastic contradiction, convergence spiral | Complete |
 | **7 — Benchmark** | Spark harness Tier 0 validation against Go implementation | In progress |
+
+PostgreSQL backend, Anthropic/Gemini provider integration, Peripheral Awareness wiring, and forums adapter are on the roadmap (Phase 7+). See `BACKLOG.md`.
 
 ### MOP (Model Output Pipeline)
 

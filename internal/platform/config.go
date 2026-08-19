@@ -95,7 +95,7 @@ func Load() (*Config, error) {
 	c := &Config{
 		IdentityDir:         envStr("IDENTITY_DIR", "./identity"),
 		AgentName:           envStr("AGENT_NAME", "aurora"),
-		LLMProvider:         envStr("LLM_PROVIDER", "anthropic"),
+		LLMProvider:         envStr("LLM_PROVIDER", "openai"),
 		LLMModel:            envStr("LLM_MODEL", ""),
 		LLMAPIKey:           envStr("LLM_API_KEY", ""),
 		LLMEndpoint:         envStr("LLM_ENDPOINT", ""),

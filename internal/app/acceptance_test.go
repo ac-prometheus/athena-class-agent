@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -739,6 +740,381 @@ func acceptanceProductionApp(t *testing.T, rawDB *sql.DB, pdb platform.DB) *App 
 }
 
 // ---------------------------------------------------------------------------
+// Stubs and helpers for 4E scenarios 1–4
+// ---------------------------------------------------------------------------
+
+// richEpisodicStubLLM returns a response containing explicit decision,
+// uncertainty, and relational-update language — the three narrative markers
+// the compression pipeline is designed to preserve using honesty tags.
+// It serves as both the session LLM and the compression LLM; the compression
+// prompt arrives in Messages[0].Content and the returned text becomes the T3
+// narrative content.
+type richEpisodicStubLLM struct{}
+
+func (s *richEpisodicStubLLM) Complete(_ context.Context, _ pkg.CompletionRequest) (*pkg.CompletionResponse, error) {
+	text := "I have decided to prioritize stability over experimentation this session. " +
+		"I remain uncertain whether the configuration change will have the intended effect. " +
+		"My relationship with the operator feels more collaborative following today's exchange."
+	return &pkg.CompletionResponse{
+		Blocks:           []pkg.ContentBlock{{Type: pkg.BlockText, Text: text}},
+		FinishReason:     "stop",
+		PromptTokens:     100,
+		CompletionTokens: 50,
+	}, nil
+}
+
+// capturingStubLLM records every non-empty System prompt it receives.
+// Compression calls (req.System == "") are ignored. Thread-safe.
+type capturingStubLLM struct {
+	mu      sync.Mutex
+	prompts []string
+}
+
+func (s *capturingStubLLM) Complete(_ context.Context, req pkg.CompletionRequest) (*pkg.CompletionResponse, error) {
+	if req.System != "" {
+		s.mu.Lock()
+		s.prompts = append(s.prompts, req.System)
+		s.mu.Unlock()
+	}
+	return &pkg.CompletionResponse{
+		Blocks:           []pkg.ContentBlock{{Type: pkg.BlockText, Text: "Session complete."}},
+		FinishReason:     "stop",
+		PromptTokens:     100,
+		CompletionTokens: 50,
+	}, nil
+}
+
+func (s *capturingStubLLM) firstPrompt() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.prompts) == 0 {
+		return ""
+	}
+	return s.prompts[0]
+}
+
+func (s *capturingStubLLM) lastPrompt() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.prompts) == 0 {
+		return ""
+	}
+	return s.prompts[len(s.prompts)-1]
+}
+
+// acceptanceProductionAppWith constructs an ersa_production App using a caller-
+// supplied LLM, sharing the same in-memory SQLite database as rawDB.  It is the
+// workhorse for 4E scenarios that need a custom LLM stub (e.g. richEpisodicStubLLM
+// or capturingStubLLM) while still exercising the full ersa_production graph.
+func acceptanceProductionAppWith(t *testing.T, rawDB *sql.DB, pdb platform.DB, llm pkg.LLMClient) *App {
+	t.Helper()
+	memStore := platform.NewSQLiteStoreFromDB(rawDB, "sqlite3://:memory:")
+	cfg := acceptanceConfig(t)
+	cfg.EmbedAPIKey = "test-voyage-key"
+	cfg.EmbedModel = "voyage-3.5"
+	application, err := NewApp(cfg, ProfileErsaProduction,
+		WithLLM(llm),
+		WithDB(pdb),
+		WithMemoryStore(memStore),
+	)
+	if err != nil {
+		t.Fatalf("acceptance NewApp(ersa_production) with custom LLM: %v", err)
+	}
+	return application
+}
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 1: Ordinary Episodic Return (ersa_production)
+// ---------------------------------------------------------------------------
+
+// TestAcceptance_Production_OrdinaryEpisodicReturn verifies the full
+// session–metabolism–retrieval chain through the ersa_production graph.
+//
+// The rich stub LLM returns a response containing a decision, an uncertainty,
+// and a relational update.  After metabolism drains:
+//   - T2 rows must exist with content and content_source provenance.
+//   - At least one T3 narrative row must exist.
+//   - Every T2 row must carry narrative_summary_id (T2→T3 chain intact).
+//   - Simulated next-wake: SearchNarrative must return the T3 with
+//     non-empty ContentSources (provenance carried into the retrieval result).
+func TestAcceptance_Production_OrdinaryEpisodicReturn(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	application := acceptanceProductionAppWith(t, rawDB, pdb, &richEpisodicStubLLM{})
+	ctx := context.Background()
+
+	if err := application.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+	if application.Supervisor != nil {
+		if err := application.Supervisor.Drain(5 * time.Second); err != nil {
+			t.Logf("supervisor drain: %v", err)
+		}
+	}
+
+	// T2 must exist with self-authored content and provenance.
+	t2Count := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM experiential_logs`)
+	if t2Count == 0 {
+		t.Error("expected at least one T2 experiential_logs row")
+	}
+	source := queryScalar[string](t, rawDB,
+		`SELECT content_source FROM experiential_logs ORDER BY created_at DESC LIMIT 1`)
+	if source != "self" {
+		t.Errorf("T2 content_source = %q, want %q", source, "self")
+	}
+
+	// Metabolism must have produced at least one T3 narrative.
+	t3Count := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM narrative_summaries`)
+	if t3Count == 0 {
+		t.Error("expected at least one T3 narrative_summaries row after metabolism")
+	}
+
+	// T2→T3 provenance chain must be intact — all T2 rows back-linked.
+	unlinked := queryScalar[int](t, rawDB,
+		`SELECT COUNT(*) FROM experiential_logs WHERE narrative_summary_id IS NULL`)
+	if unlinked > 0 {
+		t.Errorf("T2→T3 provenance broken: %d T2 row(s) have no narrative_summary_id", unlinked)
+	}
+
+	// Simulated next-wake assembly: T3 must be retrievable with provenance intact.
+	narratives, err := application.Dependencies.MemoryStore.SearchNarrative(ctx, nil, 3)
+	if err != nil {
+		t.Fatalf("SearchNarrative (simulated next-wake): %v", err)
+	}
+	if len(narratives) == 0 {
+		t.Error("next-wake assembly: T3 not retrievable via MemoryStore")
+	}
+	if len(narratives) > 0 && len(narratives[0].ContentSources) == 0 {
+		t.Error("T3 provenance incomplete: ContentSources is empty on retrieved T3")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 2: Metabolism Interruption Recovery (ersa_production)
+// ---------------------------------------------------------------------------
+
+// TestAcceptance_Production_MetabolismInterruptionRecovery verifies that the
+// ersa_production graph correctly recovers a metabolism job that was left in
+// "running" state by a process crash.
+//
+// Setup: a stale running job (started_at 10+ minutes ago) is inserted with
+// pre-seeded T2 logs before the App is created — simulating a prior crash.
+//
+// After Recover + Drain:
+//   - T2 rows must remain intact (metabolism never deletes T2).
+//   - Exactly one T3 narrative must exist (recovered once, not duplicated).
+//   - T2 rows must carry narrative_summary_id (T2→T3 provenance chain).
+//   - The recovered job must reach status "completed".
+func TestAcceptance_Production_MetabolismInterruptionRecovery(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	ctx := context.Background()
+
+	// Seed a T2 log for the crashed session so the compression pipeline has
+	// content to work with.  content_source="self" bypasses the Aegis gate.
+	_, err := rawDB.Exec(
+		`INSERT INTO experiential_logs
+			(id, session_id, content, content_source, created_at)
+		 VALUES ('t2-crashed-prod-1', 'session-crashed-prod', 'Agent output before crash.', 'self', CURRENT_TIMESTAMP)`,
+	)
+	if err != nil {
+		t.Fatalf("insert T2 log: %v", err)
+	}
+
+	// Insert a stale running job — simulates a process crash during metabolism.
+	// started_at is 10 minutes ago, older than the 5-minute Claim stale threshold.
+	_, err = rawDB.Exec(
+		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, started_at, created_at)
+		 VALUES ('stale-job-prod', 'session-crashed-prod', 'running', 'standard',
+		         datetime('now', '-10 minutes'), datetime('now', '-10 minutes'))`,
+	)
+	if err != nil {
+		t.Fatalf("insert stale running job: %v", err)
+	}
+
+	// Create the app — equivalent to daemon restart after the crash.
+	application := acceptanceProductionApp(t, rawDB, pdb)
+
+	n, err := application.Supervisor.Recover(ctx, 3)
+	if err != nil {
+		t.Fatalf("Supervisor.Recover: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("expected 1 recovered job, got %d", n)
+	}
+
+	if err := application.Supervisor.Drain(5 * time.Second); err != nil {
+		t.Logf("supervisor drain: %v", err)
+	}
+
+	// T2 must remain intact — metabolism never deletes T2 rows.
+	t2Count := queryScalar[int](t, rawDB,
+		`SELECT COUNT(*) FROM experiential_logs WHERE session_id = 'session-crashed-prod'`)
+	if t2Count == 0 {
+		t.Error("T2 rows deleted — metabolism must never delete T2")
+	}
+
+	// Exactly one T3 row must exist (recovery is idempotent — reclaimed once).
+	t3Count := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM narrative_summaries`)
+	if t3Count != 1 {
+		t.Errorf("expected exactly 1 T3 narrative row after recovery, got %d", t3Count)
+	}
+
+	// T2→T3 link must be set — provenance chain intact.
+	unlinked := queryScalar[int](t, rawDB,
+		`SELECT COUNT(*) FROM experiential_logs
+		 WHERE narrative_summary_id IS NULL AND session_id = 'session-crashed-prod'`)
+	if unlinked > 0 {
+		t.Errorf("T2→T3 link incomplete: %d T2 row(s) have no narrative_summary_id", unlinked)
+	}
+
+	// The recovered job must have reached completed status.
+	status := queryScalar[string](t, rawDB,
+		`SELECT status FROM metabolism_jobs WHERE id = 'stale-job-prod'`)
+	if status != "completed" {
+		t.Errorf("recovered job status = %q, want %q", status, "completed")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 3: Wake Before Metabolism Completion (ersa_production)
+// ---------------------------------------------------------------------------
+
+// TestAcceptance_Production_WakeBeforeMetabolismCompletion verifies that when
+// a prior session's metabolism job is still pending, a new session:
+//   (a) starts and completes without error, and
+//   (b) discloses the pending metabolism in the assembled prompt via the
+//       [Metabolism Note] marker (WP-C2).
+//
+// After the new session verifies the disclosure, Supervisor.Recover processes
+// the prior pending job, confirming the prior job can still complete.
+func TestAcceptance_Production_WakeBeforeMetabolismCompletion(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	ctx := context.Background()
+
+	// Insert a pending job from a prior session — the new session will detect
+	// this via queryOperationalState and disclose it in the assembled prompt.
+	_, err := rawDB.Exec(
+		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, created_at)
+		 VALUES ('prior-pending-prod', 'session-prior-prod', 'pending', 'standard', CURRENT_TIMESTAMP)`,
+	)
+	if err != nil {
+		t.Fatalf("insert pending job: %v", err)
+	}
+
+	// capturingLLM intercepts the assembled system prompt so we can verify the
+	// [Metabolism Note] disclosure without exposing RunSession internals.
+	capturingLLM := &capturingStubLLM{}
+	application := acceptanceProductionAppWith(t, rawDB, pdb, capturingLLM)
+
+	// New session must start cleanly despite the prior pending job.
+	if err := application.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
+		t.Fatalf("RunSession blocked by prior pending job: %v", err)
+	}
+
+	// The assembled prompt must contain the [Metabolism Note] disclosure.
+	prompt := capturingLLM.firstPrompt()
+	if !strings.Contains(prompt, "[Metabolism Note]") {
+		t.Errorf("assembled prompt missing [Metabolism Note] disclosure for pending prior job;\nfirst 500 chars:\n%s",
+			truncateStr(prompt, 500))
+	}
+
+	// The prior pending job can still complete after the new session starts.
+	if _, err := application.Supervisor.Recover(ctx, 3); err != nil {
+		t.Fatalf("Supervisor.Recover: %v", err)
+	}
+	if err := application.Supervisor.Drain(5 * time.Second); err != nil {
+		t.Logf("supervisor drain: %v", err)
+	}
+
+	// Prior job must have been processed and completed.
+	priorStatus := queryScalar[string](t, rawDB,
+		`SELECT status FROM metabolism_jobs WHERE id = 'prior-pending-prod'`)
+	if priorStatus != "completed" {
+		t.Errorf("prior pending job status = %q, want %q", priorStatus, "completed")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// 4E Scenario 4: Configuration Change Disclosure (ersa_production)
+// ---------------------------------------------------------------------------
+
+// TestAcceptance_Production_ConfigurationChangeDisclosure verifies that when
+// the lifecycle policy file changes between sessions:
+//   - configuration_applied records both the initial application and the change.
+//   - The changes_summary for the second disclosure captures the modified field.
+//   - The second session's assembled prompt contains the [configuration change] note.
+//
+// Session 1 writes an initial disclosure (first-ever policy application).
+// Session 2 detects the policy file change and writes a diff disclosure.
+// Drain is called after Session 1 to ensure its configuration_applied row is
+// committed before Session 2 reads it; the second RunSession uses the same
+// supervisor (stopped after Drain) so Submit fails with a warning, but all
+// lifecycle artifacts — including the disclosure — are recorded synchronously
+// before Submit is called.
+func TestAcceptance_Production_ConfigurationChangeDisclosure(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	ctx := context.Background()
+
+	capturingLLM := &capturingStubLLM{}
+	application := acceptanceProductionAppWith(t, rawDB, pdb, capturingLLM)
+
+	// Session 1: write initial policy and run.
+	policyV1 := `{"temporal_mode":"episodic","bridge_policy":"agent_requested","metabolism_policy":"standard","assembly_profile":"full"}`
+	if err := os.WriteFile(
+		filepath.Join(application.Config.WorkspaceDir, "lifecycle.json"),
+		[]byte(policyV1), 0644,
+	); err != nil {
+		t.Fatalf("write lifecycle.json v1: %v", err)
+	}
+
+	if err := application.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
+		t.Fatalf("RunSession #1: %v", err)
+	}
+
+	// Drain after Session 1 so its configuration_applied row is committed before
+	// Session 2 reads the last policy hash.  Drain sets stopped=true; Session 2's
+	// Submit call will log a warning but RunSession still succeeds — disclosure
+	// recording (step 7b) happens before metabolism submission (step 12).
+	if application.Supervisor != nil {
+		if err := application.Supervisor.Drain(5 * time.Second); err != nil {
+			t.Logf("supervisor drain #1: %v", err)
+		}
+	}
+
+	// Session 2: change temporal_mode so HasChanged detects a diff.
+	policyV2 := `{"temporal_mode":"diurnal","bridge_policy":"agent_requested","metabolism_policy":"standard","assembly_profile":"full"}`
+	if err := os.WriteFile(
+		filepath.Join(application.Config.WorkspaceDir, "lifecycle.json"),
+		[]byte(policyV2), 0644,
+	); err != nil {
+		t.Fatalf("write lifecycle.json v2: %v", err)
+	}
+
+	if err := application.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
+		t.Fatalf("RunSession #2: %v", err)
+	}
+
+	// configuration_applied must have at least two rows — one per session.
+	disclosureCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM configuration_applied`)
+	if disclosureCount < 2 {
+		t.Errorf("expected at least 2 configuration_applied rows (initial + change), got %d", disclosureCount)
+	}
+
+	// The most recent disclosure must capture the temporal_mode change.
+	changesSummary := queryScalar[string](t, rawDB,
+		`SELECT changes_summary FROM configuration_applied ORDER BY applied_at DESC LIMIT 1`)
+	if !strings.Contains(changesSummary, "temporal_mode") {
+		t.Errorf("changes_summary = %q, want it to contain %q", changesSummary, "temporal_mode")
+	}
+
+	// The second session's assembled prompt must contain the disclosure note.
+	secondPrompt := capturingLLM.lastPrompt()
+	if !strings.Contains(secondPrompt, "[configuration change]") {
+		t.Errorf("second session prompt missing [configuration change] disclosure;\nfirst 500 chars:\n%s",
+			truncateStr(secondPrompt, 500))
+	}
+}
+
+// ---------------------------------------------------------------------------
 // 4E Scenario 5: Invalid Configuration Fallback (ersa_production)
 // ---------------------------------------------------------------------------
 
@@ -949,148 +1325,3 @@ func (h *selfExamineStub) Execute(_ context.Context, args map[string]any) (strin
 	return fmt.Sprintf("Advisor examination (not stored):\n\n%s", content), nil
 }
 
-// ---------------------------------------------------------------------------
-// 4E Scenario 1: Ordinary Episodic Return (ersa_production)
-// ---------------------------------------------------------------------------
-
-func TestAcceptance_Production_OrdinaryEpisodicReturn(t *testing.T) {
-	rawDB, pdb := acceptanceDB(t)
-	application := acceptanceProductionApp(t, rawDB, pdb)
-
-	err := application.Runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
-	if err != nil {
-		t.Fatalf("RunSession: %v", err)
-	}
-
-	if application.Supervisor != nil {
-		application.Supervisor.Drain(5 * time.Second)
-	}
-
-	planCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM lifecycle_plans`)
-	if planCount == 0 {
-		t.Error("expected at least one lifecycle_plans row")
-	}
-	manifestCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM assembly_manifests`)
-	if manifestCount == 0 {
-		t.Error("expected at least one assembly_manifests row")
-	}
-	cpState := queryScalar[string](t, rawDB,
-		`SELECT state FROM session_checkpoints ORDER BY created_at DESC LIMIT 1`)
-	if cpState != "completed" {
-		t.Errorf("checkpoint state = %q, want %q", cpState, "completed")
-	}
-	jobCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM metabolism_jobs`)
-	if jobCount == 0 {
-		t.Error("expected at least one metabolism_jobs row")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// 4E Scenario 2: Metabolism Interruption Recovery (ersa_production)
-// ---------------------------------------------------------------------------
-
-func TestAcceptance_Production_MetabolismInterruptionRecovery(t *testing.T) {
-	rawDB, pdb := acceptanceDB(t)
-
-	_, err := rawDB.Exec(
-		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, started_at, created_at)
-		 VALUES ('stale-prod-job', 'session-crashed-prod', 'running', 'standard',
-		         datetime('now', '-10 minutes'), datetime('now', '-10 minutes'))`,
-	)
-	if err != nil {
-		t.Fatalf("insert stale running job: %v", err)
-	}
-
-	application := acceptanceProductionApp(t, rawDB, pdb)
-	ctx := context.Background()
-
-	n, err := application.Supervisor.Recover(ctx, 3)
-	if err != nil {
-		t.Fatalf("Supervisor.Recover: %v", err)
-	}
-	if n != 1 {
-		t.Errorf("expected 1 recovered job, got %d", n)
-	}
-
-	application.Supervisor.Drain(5 * time.Second)
-
-	status := queryScalar[string](t, rawDB,
-		`SELECT status FROM metabolism_jobs WHERE id = 'stale-prod-job'`)
-	if status != "completed" && status != "failed" {
-		t.Errorf("recovered job status = %q, want completed or failed (honest outcome)", status)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// 4E Scenario 3: Wake Before Metabolism Completion (ersa_production)
-// ---------------------------------------------------------------------------
-
-func TestAcceptance_Production_WakeBeforeMetabolismCompletion(t *testing.T) {
-	rawDB, pdb := acceptanceDB(t)
-
-	_, err := rawDB.Exec(
-		`INSERT INTO metabolism_jobs (id, session_id, status, job_type, created_at)
-		 VALUES ('prior-prod-pending', 'session-prior-prod', 'pending', 'standard', CURRENT_TIMESTAMP)`,
-	)
-	if err != nil {
-		t.Fatalf("insert prior pending job: %v", err)
-	}
-
-	application := acceptanceProductionApp(t, rawDB, pdb)
-	ctx := context.Background()
-
-	if err := application.Runner.RunSession(ctx, pkg.SessionTrigger{WakeReason: "heartbeat"}); err != nil {
-		t.Fatalf("RunSession blocked by prior pending job: %v", err)
-	}
-
-	if _, err := application.Supervisor.Recover(ctx, 3); err != nil {
-		t.Fatalf("Supervisor.Recover: %v", err)
-	}
-
-	application.Supervisor.Drain(5 * time.Second)
-
-	priorStatus := queryScalar[string](t, rawDB,
-		`SELECT status FROM metabolism_jobs WHERE id = 'prior-prod-pending'`)
-	if priorStatus != "completed" && priorStatus != "failed" {
-		t.Errorf("prior pending job status = %q, want completed or failed", priorStatus)
-	}
-
-	jobCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM metabolism_jobs`)
-	if jobCount < 2 {
-		t.Errorf("expected >= 2 metabolism_jobs (prior + new session), got %d", jobCount)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// 4E Scenario 4: Configuration Change Disclosure (ersa_production)
-// ---------------------------------------------------------------------------
-
-func TestAcceptance_Production_ConfigurationChangeDisclosure(t *testing.T) {
-	rawDB, pdb := acceptanceDB(t)
-	application := acceptanceProductionApp(t, rawDB, pdb)
-
-	policyJSON := `{"temporal_mode":"episodic","bridge_policy":"agent_requested","metabolism_policy":"standard","assembly_profile":"full"}`
-	if err := os.WriteFile(filepath.Join(application.Config.WorkspaceDir, "lifecycle.json"), []byte(policyJSON), 0644); err != nil {
-		t.Fatalf("write lifecycle.json: %v", err)
-	}
-
-	err := application.Runner.RunSession(context.Background(), pkg.SessionTrigger{WakeReason: "heartbeat"})
-	if err != nil {
-		t.Fatalf("RunSession: %v", err)
-	}
-
-	if application.Supervisor != nil {
-		application.Supervisor.Drain(5 * time.Second)
-	}
-
-	disclosureCount := queryScalar[int](t, rawDB, `SELECT COUNT(*) FROM configuration_applied`)
-	if disclosureCount == 0 {
-		t.Error("expected at least one configuration_applied row after policy change")
-	}
-
-	policyHash := queryScalar[string](t, rawDB,
-		`SELECT policy_hash FROM configuration_applied ORDER BY applied_at DESC LIMIT 1`)
-	if policyHash == "" {
-		t.Error("policy_hash should be non-empty for a valid policy")
-	}
-}
