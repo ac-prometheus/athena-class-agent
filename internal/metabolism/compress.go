@@ -66,11 +66,14 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 						"trust", log.AegisAnnotation.TrustScore,
 					)
 					entry = bracketUntrusted(entry, log.ContentSource)
-				} else {
-					// Carry forward the annotation with the highest trust score for T3.
-					if bestCarriedAnnotation == nil || log.AegisAnnotation.TrustScore > bestCarriedAnnotation.TrustScore {
-						bestCarriedAnnotation = log.AegisAnnotation
-					}
+				}
+				// Fix B1/C3: carry the annotation regardless of flag state — flagged
+				// content is MORE important to disclose, not less. Use the
+				// lowest-trust annotation across all sources (most conservative):
+				// a summary mixing trust-0.9 and trust-0.3 content must be
+				// disclosed at 0.3, not 0.9.
+				if bestCarriedAnnotation == nil || log.AegisAnnotation.TrustScore < bestCarriedAnnotation.TrustScore {
+					bestCarriedAnnotation = log.AegisAnnotation
 				}
 			} else if cfg.Aegis == nil {
 				// No Aegis gateway and no carried annotation — cannot screen external content.
@@ -85,16 +88,23 @@ func CompressSession(ctx context.Context, cfg CompressConfig, sessionID string, 
 				if err != nil {
 					slog.Warn("compress: aegis scan error — bracketing as untrusted", "log_id", log.ID, "err", err)
 					entry = bracketUntrusted(entry, log.ContentSource)
-				} else if !annotated.Annotation.ScanPassed {
-					slog.Warn("compress: aegis flagged content — bracketing as untrusted",
-						"log_id", log.ID,
-						"flags", annotated.Annotation.Flags,
-						"trust", annotated.Annotation.TrustScore,
-					)
-					entry = bracketUntrusted(entry, log.ContentSource)
-				} else if bestCarriedAnnotation == nil || annotated.Annotation.TrustScore > bestCarriedAnnotation.TrustScore {
+				} else {
+					if !annotated.Annotation.ScanPassed {
+						slog.Warn("compress: aegis flagged content — bracketing as untrusted",
+							"log_id", log.ID,
+							"flags", annotated.Annotation.Flags,
+							"trust", annotated.Annotation.TrustScore,
+						)
+						entry = bracketUntrusted(entry, log.ContentSource)
+					}
+					// Fix B1/C3: carry the annotation regardless of flag state, and
+					// select the lowest-trust annotation (most conservative) so that
+					// mixing high- and low-trust sources is always disclosed at the
+					// floor, not the ceiling.
 					ann := annotated.Annotation
-					bestCarriedAnnotation = &ann
+					if bestCarriedAnnotation == nil || ann.TrustScore < bestCarriedAnnotation.TrustScore {
+						bestCarriedAnnotation = &ann
+					}
 				}
 			}
 		}

@@ -85,6 +85,40 @@ func queryLastWakeAt(ctx context.Context, db platform.DB) *time.Time {
 	return &t
 }
 
+// jobStatusToMetabolism translates raw job-store status strings (as stored in
+// metabolism_jobs.status) to the canonical MetabolismStatus vocabulary.
+//
+// The job store uses plain English words ("pending", "running", "completed",
+// "failed", "review_required"); MetabolismStatus uses a different structured
+// vocabulary ("queued", "running", "complete", "failed_retryable", …). A
+// direct cast (MetabolismStatus(rawString)) silently produces an unrecognized
+// value — for example "pending" falls through every equality check in the
+// lifecycle resolver and is treated as MetabolismNotRequired, so a pending
+// prior job never generates the expected metabolism disclosure.
+//
+// This function is the single authoritative translation boundary.
+func jobStatusToMetabolism(raw string) pkg.MetabolismStatus {
+	switch raw {
+	case "pending":
+		return pkg.MetabolismQueued
+	case "running":
+		return pkg.MetabolismRunning
+	case "completed":
+		return pkg.MetabolismComplete
+	case "partial":
+		return pkg.MetabolismPartial
+	case "failed":
+		return pkg.MetabolismFailedRetry
+	case "review_required":
+		// review_required is a non-success terminal state: external content
+		// required human review before promotion. Treated as terminal failure
+		// at the resolver so the agent is disclosed that T3 is incomplete.
+		return pkg.MetabolismFailedTerminal
+	default:
+		return pkg.MetabolismNotRequired
+	}
+}
+
 // queryOperationalState reads the previous session's runtime and metabolism
 // status for resolver input. Prefers store interfaces; falls back to raw DB.
 func queryOperationalState(ctx context.Context, deps *Dependencies) pkg.OperationalState {
@@ -93,7 +127,7 @@ func queryOperationalState(ctx context.Context, deps *Dependencies) pkg.Operatio
 
 	if deps.JobStore != nil {
 		if s, err := deps.JobStore.LastStatus(ctx); err == nil && s != "" {
-			metaStatus = pkg.MetabolismStatus(s)
+			metaStatus = jobStatusToMetabolism(s)
 		}
 	} else if deps.DB != nil {
 		metaRow := deps.DB.QueryRowContext(ctx,
@@ -101,7 +135,7 @@ func queryOperationalState(ctx context.Context, deps *Dependencies) pkg.Operatio
 		)
 		var rawStatus string
 		if err := metaRow.Scan(&rawStatus); err == nil {
-			metaStatus = pkg.MetabolismStatus(rawStatus)
+			metaStatus = jobStatusToMetabolism(rawStatus)
 		}
 	}
 
