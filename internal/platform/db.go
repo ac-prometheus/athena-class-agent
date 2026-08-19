@@ -198,6 +198,16 @@ func NewSQLiteStore(dsn string) (*SQLiteStore, error) {
 	return &SQLiteStore{db: db, dsn: dsn}, nil
 }
 
+// NewSQLiteStoreFromDB wraps an existing *sql.DB as a SQLiteStore without
+// opening a second connection. Use this when the caller already holds an
+// open *sql.DB to avoid a redundant pool (e.g. in-memory test databases
+// where each connection sees a separate, empty database).
+// The dsn is stored for diagnostic logging only. Callers retain ownership
+// of db and are responsible for its lifecycle.
+func NewSQLiteStoreFromDB(db *sql.DB, dsn string) *SQLiteStore {
+	return &SQLiteStore{db: db, dsn: dsn}
+}
+
 // Close closes the underlying database.
 func (s *SQLiteStore) Close() error {
 	return s.db.Close()

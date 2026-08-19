@@ -510,6 +510,62 @@ func TestAcceptance_RecoveryAfterInterruptedLiveSession(t *testing.T) {
 var _ = fmt.Sprintf
 
 // ---------------------------------------------------------------------------
+// WP-B1: ersa_production boot test
+// ---------------------------------------------------------------------------
+
+// TestNewApp_ErsaProduction_AllDepsNonNil verifies that NewApp with
+// ProfileErsaProduction produces a fully-wired app where all four previously-nil
+// domain dependencies are non-nil: MemoryStore, EmbeddingProvider, Gateway
+// (Aegis), and ToolRegistry.
+//
+// The test uses an in-memory SQLite database (with full migrations applied via
+// acceptanceDB) and injects a stub LLM to avoid real API calls. MemoryStore is
+// injected via WithMemoryStore wrapping the same *sql.DB so that all stores share
+// the single in-memory connection — opening a second sqlite3://:memory: connection
+// would see a fresh, empty database.
+func TestNewApp_ErsaProduction_AllDepsNonNil(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+
+	// Wrap the same *sql.DB as a SQLiteStore so MemoryStore, Aegis trust store,
+	// settings, and T2 query all share the migrated in-memory connection.
+	memStore := platform.NewSQLiteStoreFromDB(rawDB, "sqlite3://:memory:")
+
+	cfg := acceptanceConfig(t)
+	// Supply an embedding API key so EmbeddingProvider is wired.
+	// The key is not validated at construction — only on first Embed() call.
+	cfg.EmbedAPIKey = "test-voyage-key-not-real"
+	cfg.EmbedModel = "voyage-3.5"
+
+	app, err := NewApp(cfg, ProfileErsaProduction,
+		WithLLM(&stubLLM{}),
+		WithDB(pdb),
+		WithMemoryStore(memStore),
+	)
+	if err != nil {
+		t.Fatalf("NewApp(ersa_production): %v", err)
+	}
+
+	deps := app.Dependencies
+	if deps.MemoryStore == nil {
+		t.Error("MemoryStore is nil after NewApp(ersa_production)")
+	}
+	if deps.EmbeddingProvider == nil {
+		t.Error("EmbeddingProvider is nil after NewApp(ersa_production)")
+	}
+	if deps.Gateway == nil {
+		t.Error("Gateway (Aegis) is nil after NewApp(ersa_production)")
+	}
+	if deps.ToolRegistry == nil {
+		t.Error("ToolRegistry is nil after NewApp(ersa_production)")
+	}
+
+	// ToolRegistry must expose at least the tier-1 discover_tools handler.
+	if _, ok := deps.ToolRegistry.Get("discover_tools"); !ok {
+		t.Error("ToolRegistry missing discover_tools handler")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // HARN-93 Scenario 1: Ordinary Episodic Return via NewApp
 // ---------------------------------------------------------------------------
 

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
@@ -9,13 +10,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ac-prometheus/athena-class-agent/internal/aegis"
 	"github.com/ac-prometheus/athena-class-agent/internal/assembly"
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
 	"github.com/ac-prometheus/athena-class-agent/internal/daemon"
 	"github.com/ac-prometheus/athena-class-agent/internal/engine"
+	"github.com/ac-prometheus/athena-class-agent/internal/memory"
 	"github.com/ac-prometheus/athena-class-agent/internal/metabolism"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/internal/platform/storage"
+	"github.com/ac-prometheus/athena-class-agent/internal/tools"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
@@ -52,6 +56,16 @@ func WithDB(db platform.DB) Option {
 	}
 }
 
+// WithMemoryStore injects a pre-built MemoryStore. Used in tests that share
+// an in-memory SQLite database across the DB and MemoryStore layers — each
+// new sqlite3://:memory: connection opens a separate, empty database, so tests
+// must pass the same *sql.DB wrapped via platform.NewSQLiteStoreFromDB.
+func WithMemoryStore(store pkg.MemoryStore) Option {
+	return func(d *Dependencies) {
+		d.MemoryStore = store
+	}
+}
+
 // NewApp constructs the fully-wired application graph and validates it
 // against the requested profile. All dependencies are constructed before
 // Validate is called — validation failure means a dependency is
@@ -69,6 +83,9 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 	}
 
 	// Database — open only if not injected via WithDB.
+	// rawSQLDB is retained so MemoryStore (SQLiteStore) can share the same
+	// *sql.DB without opening a second connection pool.
+	var rawSQLDB *sql.DB
 	driverName := DriverNameFromDSN(cfg.DatabaseDSN)
 	if deps.DB == nil && cfg.DatabaseDSN != "" {
 		store, err := platform.NewStore(cfg.DatabaseDSN)
@@ -79,6 +96,7 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 			slog.Warn("app: DB unavailable — continuing without persistence", "err", err)
 		} else {
 			deps.DB = platform.WrapSQLDB(store.DB)
+			rawSQLDB = store.DB
 		}
 	}
 
@@ -120,12 +138,73 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 		})
 	}
 
-	// MemoryStore, EmbeddingProvider, Gateway (Aegis), and ToolRegistry are
-	// wired here when their prerequisites (API keys, provider selection) are
-	// available. For now they are left nil — optional for ProfileDevelopment,
-	// required for ProfileErsaProduction (Validate will catch the gap).
-	// TODO: construct these in a follow-up sprint when the embedding provider
-	// and tool registry constructors are stabilised.
+	// MemoryStore — SQLiteStore wrapping the same *sql.DB opened above.
+	// When DB was injected by the caller (e.g. in tests via WithDB), rawSQLDB
+	// is nil and MemoryStore must be injected explicitly via WithMemoryStore.
+	// An injected store that is a *platform.SQLiteStore is still used as the
+	// backing store for Aegis trust and tool settings below.
+	var sqliteStore *platform.SQLiteStore
+	if deps.MemoryStore == nil && rawSQLDB != nil && driverName == "sqlite3" {
+		sqliteStore = platform.NewSQLiteStoreFromDB(rawSQLDB, cfg.DatabaseDSN)
+		deps.MemoryStore = sqliteStore
+	} else if ms, ok := deps.MemoryStore.(*platform.SQLiteStore); ok {
+		// Injected MemoryStore (e.g. from WithMemoryStore in tests) — reuse it
+		// as the trust store and settings store for downstream constructors.
+		sqliteStore = ms
+	}
+
+	// EmbeddingProvider — Voyage AI when EMBED_API_KEY is configured.
+	// If the key is absent, embedding is disabled and the field stays nil.
+	// ProfileErsaProduction requires it; Validate will catch the absence.
+	if deps.EmbeddingProvider == nil {
+		if cfg.EmbedAPIKey != "" {
+			model := cfg.EmbedModel
+			if model == "" {
+				model = "voyage-3.5"
+			}
+			deps.EmbeddingProvider = memory.NewVoyageProvider(cfg.EmbedAPIKey, model)
+			slog.Info("app: embedding provider ready", "model", model)
+		} else {
+			slog.Warn("app: EMBED_API_KEY not set — embedding disabled; memory search and write_reflection require it")
+		}
+	}
+
+	// ContentGateway (Aegis) — trust scorer backed by the same SQLiteStore.
+	// Requires sqliteStore to be non-nil (set above from MemoryStore).
+	// ProfileErsaProduction requires it; Validate will catch the absence.
+	if deps.Gateway == nil && sqliteStore != nil {
+		trustCfg := aegis.DefaultTrustConfig()
+		if cfg.AegisTrustSkepticalPrior > 0 {
+			trustCfg.SkepticalPrior = cfg.AegisTrustSkepticalPrior
+		}
+		if cfg.AegisTrustRampN > 0 {
+			trustCfg.RampInteractions = cfg.AegisTrustRampN
+		}
+		trustScorer := aegis.NewTrustScorer(trustCfg, sqliteStore)
+		deps.Gateway = aegis.NewGateway(trustScorer)
+		slog.Info("app: Aegis content gateway ready",
+			"skeptical_prior", trustCfg.SkepticalPrior,
+			"ramp_interactions", trustCfg.RampInteractions,
+		)
+	}
+
+	// ToolRegistry — populated with every built-in handler.
+	// Settings and T2 query access use the same SQLiteStore.
+	// Handlers that need EmbeddingProvider are skipped when it is nil —
+	// the registry is still non-nil and satisfies ProfileErsaProduction.
+	if deps.ToolRegistry == nil && sqliteStore != nil {
+		registry := tools.NewDefaultRegistry()
+		tools.RegisterAll(registry, tools.Stores{
+			Memory:   deps.MemoryStore,
+			T2Query:  sqliteStore,
+			Settings: sqliteStore,
+		}, tools.Providers{
+			Embedding: deps.EmbeddingProvider,
+			LLMFn:     nil, // T4 self-examination not wired until LLM wrapper is finalised
+		})
+		deps.ToolRegistry = registry
+		slog.Info("app: tool registry ready", "groups", len(registry.List()))
+	}
 
 	// Validate ONCE after all dependencies are constructed. This is the single
 	// gate that enforces profile requirements — earlier construction steps do
