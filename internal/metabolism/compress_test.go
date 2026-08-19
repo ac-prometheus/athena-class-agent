@@ -265,8 +265,8 @@ func TestIsExternalSource(t *testing.T) {
 		expected bool
 	}{
 		{"self", false},
-		{"operator", true},
-		{"tool-result", true},
+		{"operator", false},
+		{"tool-result", false},
 		{"browser-content", true},
 		{"search-result", true},
 		{"forum-content", true},
