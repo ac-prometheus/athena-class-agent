@@ -92,26 +92,47 @@ func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.Operat
 	}
 	reasons["metabolism_policy"] = "copied from normative policy (workspace config); default: standard"
 
+	// PriorMetabolismStatus — inspect the prior session's metabolism outcome.
+	// Pending (queued/running) and failed/partial states warrant a disclosure so the
+	// agent knows T3 coverage may be incomplete. The status is carried on the plan so
+	// the continuity assembly phase can add an in-band note without a second DB query.
+	priorMeta := opState.PriorMetabolismStatus
+	switch {
+	case priorMeta == pkg.MetabolismQueued || priorMeta == pkg.MetabolismRunning:
+		disclosures = append(disclosures, "prior session metabolism is pending ("+string(priorMeta)+
+			") — experience from the last session may not be fully integrated into memory")
+		reasons["metabolism_status"] = "prior metabolism pending (" + string(priorMeta) +
+			") — T3 coverage may be incomplete; continuity phase will add in-band disclosure"
+	case priorMeta == pkg.MetabolismFailedRetry || priorMeta == pkg.MetabolismFailedTerminal || priorMeta == pkg.MetabolismPartial:
+		disclosures = append(disclosures, "prior session metabolism failed or is incomplete ("+string(priorMeta)+
+			") — experience from the last session may not be fully integrated into memory")
+		reasons["metabolism_status"] = "prior metabolism " + string(priorMeta) +
+			" — T3 coverage incomplete; continuity phase will add in-band disclosure"
+	case priorMeta != "":
+		reasons["metabolism_status"] = "prior metabolism completed normally (" + string(priorMeta) + ")"
+	}
+
 	return &pkg.LifecyclePlan{
 		ID:                 planID,
 		// SessionID is intentionally empty here; the persistence layer sets it after
 		// creating the session row so the plan can reference the session FK.
-		SessionID:          "",
-		TemporalMode:       temporalMode,
-		WakeCause:          facts.PrimaryCause,
-		WakeCauseSecondary: wakeCauseSecondary,
-		ActivityProfile:    activityProfile,
-		AssemblyProfile:    assemblyProfile,
-		BridgePolicy:       bridgePolicy,
-		MetabolismPolicy:   metabolismPolicy,
-		SeamKind:           facts.SeamKind,
-		ResolverVersion:    resolverVersion,
-		PolicyHash:         policy.CommitHash,
-		TransitionContexts: facts.TransitionContexts,
-		GapFacts:           &facts.GapFacts,
-		Disclosures:        disclosures,
-		Reasons:            reasons,
-		CreatedAt:          resolvedAt,
+		SessionID:             "",
+		TemporalMode:          temporalMode,
+		WakeCause:             facts.PrimaryCause,
+		WakeCauseSecondary:    wakeCauseSecondary,
+		ActivityProfile:       activityProfile,
+		AssemblyProfile:       assemblyProfile,
+		BridgePolicy:          bridgePolicy,
+		MetabolismPolicy:      metabolismPolicy,
+		PriorMetabolismStatus: priorMeta,
+		SeamKind:              facts.SeamKind,
+		ResolverVersion:       resolverVersion,
+		PolicyHash:            policy.CommitHash,
+		TransitionContexts:    facts.TransitionContexts,
+		GapFacts:              &facts.GapFacts,
+		Disclosures:           disclosures,
+		Reasons:               reasons,
+		CreatedAt:             resolvedAt,
 	}
 }
 

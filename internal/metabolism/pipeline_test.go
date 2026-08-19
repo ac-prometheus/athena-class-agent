@@ -555,6 +555,83 @@ func TestProcessSession_SalienceScoresAllLogs(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// WP-C1: Compression is required when partially wired
+// ---------------------------------------------------------------------------
+
+// TestProcessSession_PartialDeps_LLMWithoutDB verifies that a pipeline with
+// llmFn set but db nil fails with a clear error rather than completing silently.
+// A "completed" job that skipped compression misrepresents work done.
+func TestProcessSession_PartialDeps_LLMWithoutDB(t *testing.T) {
+	ctx := context.Background()
+	sessionID := "partial-wiring-test"
+
+	store := newMockT2Store()
+	store.addLog(sessionID, pkg.ExperientialLog{
+		ID:            "log-1",
+		Content:       "Session content that needs to be compressed.",
+		ContentSource: "self",
+		CreatedAt:     time.Now(),
+	})
+
+	// llmFn is set, db is nil — partial wiring.
+	llmFn := func(prompt string) (string, error) {
+		return "compressed", nil
+	}
+
+	pipeline := NewPipeline(store, &mockGateway{}, llmFn, nil, nil, "")
+	// Do NOT call WithDB — leave db nil on purpose.
+
+	err := pipeline.ProcessSession(ctx, sessionID)
+	if err == nil {
+		t.Fatal("expected error when llmFn is set but db is nil, got nil")
+	}
+	if !strings.Contains(err.Error(), "partially configured") {
+		t.Errorf("error should mention 'partially configured': %v", err)
+	}
+}
+
+// TestProcessSession_PartialDeps_DBWithoutLLM verifies that a pipeline with
+// db set but llmFn nil also fails when logs exist.
+func TestProcessSession_PartialDeps_DBWithoutLLM(t *testing.T) {
+	ctx := context.Background()
+	sessionID := "partial-db-only-test"
+
+	store := newMockT2Store()
+	store.addLog(sessionID, pkg.ExperientialLog{
+		ID:            "log-1",
+		Content:       "Session content.",
+		ContentSource: "self",
+		CreatedAt:     time.Now(),
+	})
+
+	db := newMockDB()
+	// Pipeline with db set but no llmFn — partial wiring.
+	pipeline := NewPipeline(store, &mockGateway{}, nil, nil, nil, "")
+	pipeline.WithDB(db, "sqlite3")
+	// llmFn stays nil
+
+	err := pipeline.ProcessSession(ctx, sessionID)
+	if err == nil {
+		t.Fatal("expected error when db is set but llmFn is nil, got nil")
+	}
+	if !strings.Contains(err.Error(), "partially configured") {
+		t.Errorf("error should mention 'partially configured': %v", err)
+	}
+}
+
+// TestProcessSession_NoDeps_NoLogs_Succeeds ensures that a pipeline with no deps
+// and no logs (empty session) still succeeds — nothing to compress.
+func TestProcessSession_NoDeps_NoLogs_Succeeds(t *testing.T) {
+	ctx := context.Background()
+	store := newMockT2Store() // empty
+
+	pipeline := NewPipeline(store, &mockGateway{}, nil, nil, nil, "")
+	if err := pipeline.ProcessSession(ctx, "empty-no-deps"); err != nil {
+		t.Fatalf("empty session with no deps should succeed, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Job lifecycle: CommitJob → CompleteJob
 // ---------------------------------------------------------------------------
 

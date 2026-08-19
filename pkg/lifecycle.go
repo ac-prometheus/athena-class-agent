@@ -162,8 +162,11 @@ type LifecyclePlan struct {
 	ActivityProfile    ActivityProfile   `json:"activity_profile"`
 	AssemblyProfile    AssemblyProfile   `json:"assembly_profile"`
 	BridgePolicy       BridgePolicy      `json:"bridge_policy"`
-	MetabolismPolicy   string            `json:"metabolism_policy"`
-	SeamKind           SeamKind          `json:"seam_kind"`
+	MetabolismPolicy      string           `json:"metabolism_policy"`
+	// PriorMetabolismStatus carries the last known metabolism outcome into the plan
+	// so assembly phases can disclose incomplete T3 coverage without a second DB query.
+	PriorMetabolismStatus MetabolismStatus `json:"prior_metabolism_status,omitempty"`
+	SeamKind              SeamKind         `json:"seam_kind"`
 	ResolverVersion    string            `json:"resolver_version"`
 	PolicyHash         string            `json:"policy_hash,omitempty"`
 	GapFacts           *GapFacts         `json:"gap_facts,omitempty"`

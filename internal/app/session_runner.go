@@ -180,9 +180,14 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 	// Wire memory dependencies into assembly — enables continuity phase (T3 retrieval)
 	// and echo-pool phase (semantic echo retrieval). Bridge is set to the designed
 	// default AbstainRate of 0.20; BridgePolicy on the plan gates whether synthesis fires.
+	// SetLLMFn is required alongside SetBridge: without it cfg.llmFn stays nil and
+	// bridge synthesis never fires regardless of BridgePolicy (Fable 4B carry-forward C-1).
 	if r.deps.MemoryStore != nil {
 		assembleCfg.SetStore(r.deps.MemoryStore)
 		assembleCfg.SetBridge(assembly.DefaultBridgeConfig())
+	}
+	if r.deps.LLM != nil {
+		assembleCfg.SetLLMFn(makeLLMFn(r.deps.LLM))
 	}
 	if r.deps.EmbeddingProvider != nil {
 		assembleCfg.SetProvider(r.deps.EmbeddingProvider)

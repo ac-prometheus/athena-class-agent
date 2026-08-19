@@ -159,11 +159,22 @@ func (p *Pipeline) ProcessSession(ctx context.Context, sessionID string) error {
 			)
 		}
 	} else if len(logs) > 0 {
-		slog.Info("metabolism: skipping compression — dependencies not configured",
-			"session", sessionID,
-			"has_llm", p.llmFn != nil,
-			"has_db", p.db != nil,
-		)
+		if p.llmFn == nil && p.db == nil {
+			// Both compression dependencies are absent — deliberate no-compression mode.
+			// Typically wired this way in test contexts or configurations that explicitly
+			// skip T2→T3 compression (e.g. Phase 1 only). Not an error.
+			slog.Info("metabolism: compression not configured — skipping (llmFn and db both nil)",
+				"session", sessionID, "uncovered_logs", len(logs),
+			)
+		} else {
+			// At least one compression dependency is configured but the other is absent.
+			// The operator wired compression intent without completing the wiring.
+			// Returning success here would produce a "completed" job that silently skipped
+			// compression — misrepresenting work done and leaving T3 gaps unexplained.
+			return fmt.Errorf("metabolism: compression required but partially configured "+
+				"(has_llm=%v, has_db=%v): %d logs need compression — ensure both llmFn and db are wired",
+				p.llmFn != nil, p.db != nil, len(logs))
+		}
 	}
 
 	// Phase 3: Dream cycle (Sprint 4)

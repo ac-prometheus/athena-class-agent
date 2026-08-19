@@ -432,3 +432,109 @@ func TestResolveAssemblyProfile_InitialSupersedesShortGap(t *testing.T) {
 		t.Errorf("AssemblyProfile = %q, want %q — initial supersedes short gap", plan.AssemblyProfile, pkg.AssemblyFull)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// WP-C2: Pending metabolism shapes orientation
+// ---------------------------------------------------------------------------
+
+func TestResolve_MetabolismPending_AddsDisclosure(t *testing.T) {
+	for _, status := range []pkg.MetabolismStatus{pkg.MetabolismQueued, pkg.MetabolismRunning} {
+		t.Run(string(status), func(t *testing.T) {
+			o := pkg.OperationalState{PriorMetabolismStatus: status}
+			plan := testResolve(defaultPolicy(), minimalFacts(), o)
+
+			if plan.PriorMetabolismStatus != status {
+				t.Errorf("PriorMetabolismStatus = %q, want %q", plan.PriorMetabolismStatus, status)
+			}
+			found := false
+			for _, d := range plan.Disclosures {
+				if len(d) > 0 && containsSubstr(d, "pending") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected a 'pending' disclosure for metabolism status %q, got: %v", status, plan.Disclosures)
+			}
+			if _, ok := plan.Reasons["metabolism_status"]; !ok {
+				t.Error("Reasons missing 'metabolism_status' key")
+			}
+		})
+	}
+}
+
+func TestResolve_MetabolismFailed_AddsDisclosure(t *testing.T) {
+	for _, status := range []pkg.MetabolismStatus{
+		pkg.MetabolismFailedRetry, pkg.MetabolismFailedTerminal, pkg.MetabolismPartial,
+	} {
+		t.Run(string(status), func(t *testing.T) {
+			o := pkg.OperationalState{PriorMetabolismStatus: status}
+			plan := testResolve(defaultPolicy(), minimalFacts(), o)
+
+			if plan.PriorMetabolismStatus != status {
+				t.Errorf("PriorMetabolismStatus = %q, want %q", plan.PriorMetabolismStatus, status)
+			}
+			found := false
+			for _, d := range plan.Disclosures {
+				if containsSubstr(d, "failed") || containsSubstr(d, "incomplete") {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("expected a 'failed/incomplete' disclosure for status %q, got: %v", status, plan.Disclosures)
+			}
+			if _, ok := plan.Reasons["metabolism_status"]; !ok {
+				t.Error("Reasons missing 'metabolism_status' key")
+			}
+		})
+	}
+}
+
+func TestResolve_MetabolismComplete_NoDisclosure(t *testing.T) {
+	o := pkg.OperationalState{PriorMetabolismStatus: pkg.MetabolismComplete}
+	plan := testResolve(defaultPolicy(), minimalFacts(), o)
+
+	if plan.PriorMetabolismStatus != pkg.MetabolismComplete {
+		t.Errorf("PriorMetabolismStatus = %q, want complete", plan.PriorMetabolismStatus)
+	}
+	// No metabolism-related disclosure expected for a clean completion.
+	for _, d := range plan.Disclosures {
+		if containsSubstr(d, "pending") || containsSubstr(d, "failed") || containsSubstr(d, "incomplete") {
+			t.Errorf("unexpected metabolism disclosure for complete status: %q", d)
+		}
+	}
+	if _, ok := plan.Reasons["metabolism_status"]; !ok {
+		t.Error("Reasons should still include 'metabolism_status' key even for complete")
+	}
+}
+
+func TestResolve_MetabolismEmpty_NoDisclosure(t *testing.T) {
+	// Empty PriorMetabolismStatus (e.g. first session) should add no disclosure.
+	plan := testResolve(defaultPolicy(), minimalFacts(), defaultOpState())
+	for _, d := range plan.Disclosures {
+		if containsSubstr(d, "metabolism") {
+			t.Errorf("unexpected metabolism disclosure for empty status: %q", d)
+		}
+	}
+}
+
+func TestResolve_PriorMetabolismStatusCarriedOnPlan(t *testing.T) {
+	o := pkg.OperationalState{PriorMetabolismStatus: pkg.MetabolismQueued}
+	plan := testResolve(defaultPolicy(), minimalFacts(), o)
+
+	if plan.PriorMetabolismStatus != pkg.MetabolismQueued {
+		t.Errorf("PriorMetabolismStatus not carried on plan: got %q, want %q",
+			plan.PriorMetabolismStatus, pkg.MetabolismQueued)
+	}
+}
+
+// containsSubstr is a helper to check substring presence without importing strings.
+func containsSubstr(s, sub string) bool {
+	return len(s) >= len(sub) && func() bool {
+		for i := 0; i <= len(s)-len(sub); i++ {
+			if s[i:i+len(sub)] == sub {
+				return true
+			}
+		}
+		return false
+	}()
+}

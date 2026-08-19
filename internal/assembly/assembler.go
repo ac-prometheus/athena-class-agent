@@ -118,6 +118,16 @@ func (c *AssembleConfig) SetBridge(bridge awareness.BridgeConfig) *AssembleConfi
 	return c
 }
 
+// SetLLMFn wires the LLM function used by the orientation bridge synthesis phase.
+// Without this, bridge synthesis is permanently disabled regardless of BridgePolicy —
+// the check in phase_continuity.go gates on cfg.llmFn != nil. Must be called alongside
+// SetBridge for bridge synthesis to actually fire.
+// Returns the receiver pointer for method chaining.
+func (c *AssembleConfig) SetLLMFn(llmFn func(string) (string, error)) *AssembleConfig {
+	c.llmFn = llmFn
+	return c
+}
+
 // DefaultBridgeConfig returns the recommended bridge configuration for production sessions.
 // AbstainRate of 0.20 means roughly one in five sessions skips bridge synthesis,
 // preventing it from becoming a mechanical ritual (matches Aurora's design).

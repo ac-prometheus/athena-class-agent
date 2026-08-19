@@ -57,6 +57,28 @@ func (p *ContinuityPhase) assembleContinuity(
 			"similarity search unavailable — retrieval is recency-only; use memory search for targeted lookups")
 	}
 
+	// Metabolism disclosure — injected in-band when prior session metabolism is
+	// incomplete. This surfaces the gap where the agent reads it, not only as a
+	// header disclosure. When T3 is empty it also advises using memory search as
+	// a fallback for recent experience that never made it into narrative memory.
+	if cfg.Plan != nil {
+		ms := cfg.Plan.PriorMetabolismStatus
+		isPending := ms == pkg.MetabolismQueued || ms == pkg.MetabolismRunning
+		isFailed := ms == pkg.MetabolismFailedRetry || ms == pkg.MetabolismFailedTerminal || ms == pkg.MetabolismPartial
+		if isPending || isFailed {
+			note := fmt.Sprintf(
+				"[Metabolism Note] Prior session metabolism is %s. Experience from the last session may not be fully integrated into memory.",
+				string(ms),
+			)
+			if len(narratives) == 0 {
+				note += " No T3 narrative summaries are available; use memory search for targeted recall of recent experience."
+			}
+			parts = append(parts, note)
+			manifest.AccessHints = append(manifest.AccessHints,
+				"prior metabolism "+string(ms)+" — T3 may not cover the most recent session; memory search is the fallback")
+		}
+	}
+
 	var recentNarrative string
 	for i, n := range narratives {
 		if i == 0 {
