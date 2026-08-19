@@ -67,7 +67,12 @@ type AssembleConfig struct {
 
 	// DB is used for the witness check and other operational table queries.
 	// May be nil; when nil, the witness check is skipped with a warning.
+	// Deprecated: prefer AssemblyStore for all operational table access.
 	DB platform.DB
+
+	// AssemblyStore is the repository port for identity persistence operations
+	// (witness letter check, operator action logging). When set, supersedes raw DB access.
+	AssemblyStore pkg.AssemblyStore
 
 	// SkipWitnessCheck bypasses the witness letter requirement when true.
 	// Only for automated testing — logged explicitly to operator_actions when set.

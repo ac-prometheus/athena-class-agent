@@ -33,7 +33,7 @@ func (r *Phase1Runner) RunSession(ctx context.Context, trigger pkg.SessionTrigge
 		return fmt.Errorf("assembling context: %w", err)
 	}
 
-	sess := session.NewSession(r.deps.Config.AgentName, trigger.WakeReason, nil)
+	sess := session.NewSession(r.deps.Config.AgentName, trigger.WakeReason)
 	budget := assembly.NewTokenBudget(r.deps.Config.TokenBudget, r.deps.Config.HardFloorTokens)
 	hooks := engine.NewHookPipeline()
 
@@ -76,10 +76,6 @@ func (r *Phase1Runner) RunSession(ctx context.Context, trigger pkg.SessionTrigge
 	})
 	if hookErr != nil {
 		return fmt.Errorf("post-turn hooks: %w", hookErr)
-	}
-
-	if err := sess.WriteCheckpoint(ctx); err != nil {
-		return fmt.Errorf("writing checkpoint: %w", err)
 	}
 
 	if err := sess.End(); err != nil {

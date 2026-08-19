@@ -176,8 +176,8 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 		SessionTrigger: cfg.SessionTrigger,
 	}, sessionRunner)
 
-	if deps.DB != nil {
-		d.WithDB(deps.DB, driverName)
+	if deps.LifecycleStore != nil {
+		d.WithLifecycleStore(deps.LifecycleStore)
 	}
 	if supervisor != nil {
 		d.WithSupervisor(supervisor)

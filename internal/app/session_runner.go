@@ -140,7 +140,7 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 	plan := lifecycle.Resolve(policy, facts, opState, mustRandHex(16), wakeAt.UTC())
 
 	// 6. Create session.
-	sess := session.NewSession(r.deps.Config.AgentName, string(plan.WakeCause), r.deps.DB)
+	sess := session.NewSession(r.deps.Config.AgentName, string(plan.WakeCause))
 
 	// 7. Backfill SessionID into plan.
 	plan.SessionID = sess.GetID()
@@ -174,6 +174,7 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 	assembleCfg.SessionID = sess.GetID()
 	assembleCfg.InbandNotes = notes
 	assembleCfg.DB = r.deps.DB
+	assembleCfg.AssemblyStore = r.deps.AssemblyStore
 	assembleCfg.SkipWitnessCheck = r.deps.Config.SkipWitnessCheck
 
 	// 9. Assemble context.

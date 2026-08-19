@@ -11,7 +11,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestNewSession_CreatesValidSession(t *testing.T) {
-	s := NewSession("aurora", "manual", nil)
+	s := NewSession("aurora", "manual")
 
 	if s == nil {
 		t.Fatal("NewSession returned nil")
@@ -34,7 +34,7 @@ func TestNewSession_CreatesValidSession(t *testing.T) {
 }
 
 func TestNewSession_IDContainsAgentName(t *testing.T) {
-	s := NewSession("ersa", "scheduled", nil)
+	s := NewSession("ersa", "scheduled")
 
 	if len(s.ID) < 5 {
 		t.Fatalf("ID too short: %q", s.ID)
@@ -46,8 +46,8 @@ func TestNewSession_IDContainsAgentName(t *testing.T) {
 }
 
 func TestNewSession_UniqueIDs(t *testing.T) {
-	s1 := NewSession("test", "manual", nil)
-	s2 := NewSession("test", "manual", nil)
+	s1 := NewSession("test", "manual")
+	s2 := NewSession("test", "manual")
 
 	if s1.ID == s2.ID {
 		t.Error("two sessions should have unique IDs")
@@ -55,7 +55,7 @@ func TestNewSession_UniqueIDs(t *testing.T) {
 }
 
 func TestSession_Start_AlreadyActive(t *testing.T) {
-	s := NewSession("test", "manual", nil)
+	s := NewSession("test", "manual")
 
 	// Already active from NewSession, Start should be no-op
 	err := s.Start("other", "scheduled")
@@ -69,7 +69,7 @@ func TestSession_Start_AlreadyActive(t *testing.T) {
 }
 
 func TestSession_End(t *testing.T) {
-	s := NewSession("test", "manual", nil)
+	s := NewSession("test", "manual")
 
 	err := s.End()
 	if err != nil {
@@ -87,7 +87,7 @@ func TestSession_End(t *testing.T) {
 }
 
 func TestSession_RecordTurn(t *testing.T) {
-	s := NewSession("test", "manual", nil)
+	s := NewSession("test", "manual")
 
 	s.RecordTurn(100, 50)
 	if s.TurnCount() != 1 {
@@ -107,21 +107,21 @@ func TestSession_RecordTurn(t *testing.T) {
 }
 
 func TestSession_TurnCount_Initial(t *testing.T) {
-	s := NewSession("test", "manual", nil)
+	s := NewSession("test", "manual")
 	if s.TurnCount() != 0 {
 		t.Errorf("initial TurnCount = %d, want 0", s.TurnCount())
 	}
 }
 
 func TestSession_GetID(t *testing.T) {
-	s := NewSession("test", "manual", nil)
+	s := NewSession("test", "manual")
 	if s.GetID() != s.ID {
 		t.Errorf("GetID() = %q, want %q", s.GetID(), s.ID)
 	}
 }
 
 func TestSession_GetState(t *testing.T) {
-	s := NewSession("test", "manual", nil)
+	s := NewSession("test", "manual")
 
 	if s.GetState() != pkg.SessionStateActive {
 		t.Errorf("GetState() = %q, want %q", s.GetState(), pkg.SessionStateActive)
@@ -133,53 +133,3 @@ func TestSession_GetState(t *testing.T) {
 	}
 }
 
-func TestSession_WriteCheckpoint_NilDB(t *testing.T) {
-	s := NewSession("test", "manual", nil)
-
-	err := s.WriteCheckpoint(nil)
-	if err != nil {
-		t.Errorf("WriteCheckpoint with nil db should return nil, got: %v", err)
-	}
-}
-
-func TestInterruptedSession_InterruptNote(t *testing.T) {
-	is := &InterruptedSession{
-		SessionID:  "test-123",
-		TurnNumber: 5,
-	}
-	// Date is zero, but method should not panic
-	note := is.InterruptNote()
-	if note == "" {
-		t.Error("InterruptNote should not be empty")
-	}
-	if !contains(note, "interrupted") {
-		t.Errorf("InterruptNote should mention 'interrupted': %q", note)
-	}
-	if !contains(note, "5 turn(s)") {
-		t.Errorf("InterruptNote should mention turn count: %q", note)
-	}
-}
-
-func TestCheckpointScan_NilDB(t *testing.T) {
-	sessions, err := CheckpointScan(nil, nil)
-	if err != nil {
-		t.Errorf("CheckpointScan with nil db should return nil error, got: %v", err)
-	}
-	if sessions != nil {
-		t.Error("CheckpointScan with nil db should return nil sessions")
-	}
-}
-
-// contains is a helper for string containment checks.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && searchString(s, substr)
-}
-
-func searchString(s, sub string) bool {
-	for i := 0; i <= len(s)-len(sub); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}

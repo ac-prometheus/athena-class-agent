@@ -2,13 +2,11 @@ package assembly
 
 import (
 	"context"
-	"crypto/rand"
 	"fmt"
 	"log/slog"
 	"strings"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/identity"
-	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 )
 
 // IdentityPhase implements Phase for Phase 1 — identity document loading and integrity verification.
@@ -95,56 +93,40 @@ func buildIdentityBlock(docs *identity.IdentityDocs) string {
 	return b.String()
 }
 
-// enforceWitnessCheck queries founding_records for a witness_letter row.
+// enforceWitnessCheck queries founding_records for a witness_letter row via AssemblyStore.
 // On first boot (all identity anchors new), this is required — fail-closed.
 // SKIP_WITNESS_CHECK=true bypasses the check but logs to operator_actions.
 func enforceWitnessCheck(ctx context.Context, cfg *AssembleConfig) error {
-	if cfg.DB == nil {
+	if cfg.AssemblyStore == nil {
 		if cfg.SkipWitnessCheck {
-			slog.Warn("assembly: witness check skipped — no DB available, SKIP_WITNESS_CHECK=true")
+			slog.Warn("assembly: witness check skipped — no AssemblyStore available, SKIP_WITNESS_CHECK=true")
 			return nil
 		}
-		return fmt.Errorf("WitnessRequired: no DB connection available to verify witness letter. " +
+		return fmt.Errorf("WitnessRequired: no AssemblyStore available to verify witness letter. " +
 			"Set SKIP_WITNESS_CHECK=true to bypass (development only).")
 	}
 
-	// Check founding_records for a witness letter.
-	row := cfg.DB.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM founding_records WHERE record_type = 'witness_letter'`)
-	var count int
-	if err := row.Scan(&count); err != nil {
+	// Check founding_records for a witness letter via the store port.
+	hasLetter, err := cfg.AssemblyStore.HasWitnessLetter(ctx)
+	if err != nil {
 		// If the table doesn't exist yet (pre-migration), treat as absent.
-		slog.Warn("assembly: could not query founding_records", "err", err)
-		count = 0
+		slog.Warn("assembly: could not query witness letter", "err", err)
+		hasLetter = false
 	}
 
-	if count > 0 {
+	if hasLetter {
 		return nil // witness letter present — all good
 	}
 
 	if cfg.SkipWitnessCheck {
 		slog.Warn("assembly: witness letter absent but SKIP_WITNESS_CHECK=true — logging bypass")
-		logOperatorAction(ctx, cfg.DB, "witness_check_bypassed",
-			"First boot proceeded without a witness letter — SKIP_WITNESS_CHECK was set.")
+		if logErr := cfg.AssemblyStore.LogOperatorAction(ctx, "witness_check_bypassed",
+			"First boot proceeded without a witness letter — SKIP_WITNESS_CHECK was set."); logErr != nil {
+			slog.Warn("assembly: could not log operator action", "err", logErr)
+		}
 		return nil
 	}
 
 	return fmt.Errorf("WitnessRequired: no witness letter found in founding_records. " +
 		"Set SKIP_WITNESS_CHECK=true to bypass (logged to operator_actions).")
-}
-
-// logOperatorAction writes a row to operator_actions. Best-effort — errors are only logged.
-func logOperatorAction(ctx context.Context, db platform.DB, actionType, description string) {
-	var buf [8]byte
-	if _, err := rand.Read(buf[:]); err != nil {
-		return
-	}
-	id := fmt.Sprintf("%x", buf[:])
-	_, err := db.ExecContext(ctx,
-		`INSERT INTO operator_actions (id, action_type, actor, description) VALUES ($1, $2, 'system', $3)`,
-		id, actionType, description,
-	)
-	if err != nil {
-		slog.Warn("assembly: could not write operator_action", "action_type", actionType, "err", err)
-	}
 }

@@ -2,27 +2,25 @@ package daemon
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/channels"
 	"github.com/ac-prometheus/athena-class-agent/internal/metabolism"
-	"github.com/ac-prometheus/athena-class-agent/internal/platform"
-	"github.com/ac-prometheus/athena-class-agent/internal/session"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
 // Daemon runs the persistent process. In heartbeat mode, it polls wake
 // conditions and starts sessions. In external mode, it waits for triggers.
 type Daemon struct {
-	cfg        Config
-	runner     sessionRunner
-	registry   *channels.ChannelRegistry
-	gateway    pkg.ContentGateway
-	waker      *WakeScheduler
-	db         platform.DB // optional; enables checkpoint scan on startup
-	driverName string      // "sqlite3" or "postgres"
-	supervisor *metabolism.Supervisor // bounded-concurrency recovery and drain
+	cfg            Config
+	runner         sessionRunner
+	registry       *channels.ChannelRegistry
+	gateway        pkg.ContentGateway
+	waker          *WakeScheduler
+	lifecycleStore pkg.LifecycleStore // optional; enables stale checkpoint recovery on startup
+	supervisor     *metabolism.Supervisor // bounded-concurrency recovery and drain
 }
 
 // sessionRunner is the minimal interface the daemon needs from assembly.
@@ -48,10 +46,10 @@ func New(cfg Config, runner sessionRunner) *Daemon {
 	return &Daemon{cfg: cfg, runner: runner}
 }
 
-// WithDB attaches a database handle so the daemon can run CheckpointScan at startup.
-func (d *Daemon) WithDB(db platform.DB, driverName string) {
-	d.db = db
-	d.driverName = driverName
+// WithLifecycleStore attaches a LifecycleStore so the daemon can recover stale
+// checkpoints at startup via InterruptStaleCheckpoints.
+func (d *Daemon) WithLifecycleStore(store pkg.LifecycleStore) {
+	d.lifecycleStore = store
 }
 
 // WithSupervisor attaches a metabolism Supervisor for bounded-concurrency
@@ -133,22 +131,27 @@ func (d *Daemon) drainSupervisor() {
 	}
 }
 
-// scanInterruptedSessions calls CheckpointScan and returns in-band notes for any
-// sessions that were interrupted. Returns nil if DB is unavailable or no interruptions found.
+// scanInterruptedSessions marks stale active checkpoints as interrupted via the
+// LifecycleStore and returns an in-band note when any are found.
+// Returns nil if the LifecycleStore is unavailable or no interruptions are found.
 func (d *Daemon) scanInterruptedSessions(ctx context.Context) []string {
-	if d.db == nil {
+	if d.lifecycleStore == nil {
 		return nil
 	}
-	interrupted, err := session.CheckpointScan(ctx, d.db)
+	cutoff := time.Now().Add(-10 * time.Minute)
+	n, err := d.lifecycleStore.InterruptStaleCheckpoints(ctx, cutoff)
 	if err != nil {
 		slog.Warn("daemon: checkpoint scan failed", "err", err)
 		return nil
 	}
-	notes := make([]string, 0, len(interrupted))
-	for _, is := range interrupted {
-		notes = append(notes, is.InterruptNote())
+	if n == 0 {
+		return nil
 	}
-	return notes
+	slog.Warn("daemon: interrupted sessions found", "count", n)
+	return []string{
+		"[session interrupted] " + fmt.Sprintf("%d session(s) were interrupted before this wake; "+
+			"their records up to the interruption point are intact.", n),
+	}
 }
 
 // recoverMetabolismJobs scans for incomplete metabolism jobs at startup and
