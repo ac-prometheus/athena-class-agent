@@ -48,7 +48,10 @@ func (r *JobRunner) Submit(ctx context.Context, sessionID, jobType string) error
 		"job_id", jobID, "session_id", sessionID, "job_type", jobType)
 
 	go func() {
-		if err := r.Run(context.Background(), jobID, sessionID); err != nil {
+		// Use the caller's ctx so daemon shutdown cancels the goroutine.
+		// The job is already durably committed — if the process exits before
+		// Run completes, RecoverStalled will pick it up on next startup.
+		if err := r.Run(ctx, jobID, sessionID); err != nil {
 			r.logger.Error("jobrunner: background run failed",
 				"job_id", jobID, "session_id", sessionID, "err", err)
 		}

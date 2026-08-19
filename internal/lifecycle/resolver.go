@@ -84,6 +84,14 @@ func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.Operat
 		wakeCauseSecondary = &c
 	}
 
+	// MetabolismPolicy — normative policy from workspace config. Default to "standard"
+	// so the pipeline always has a valid value when the workspace config omits it.
+	metabolismPolicy := policy.MetabolismPolicy
+	if metabolismPolicy == "" {
+		metabolismPolicy = "standard"
+	}
+	reasons["metabolism_policy"] = "copied from normative policy (workspace config); default: standard"
+
 	return &pkg.LifecyclePlan{
 		ID:                 planID,
 		// SessionID is intentionally empty here; the persistence layer sets it after
@@ -95,7 +103,7 @@ func Resolve(policy pkg.LifecyclePolicy, facts pkg.WakeFacts, opState pkg.Operat
 		ActivityProfile:    activityProfile,
 		AssemblyProfile:    assemblyProfile,
 		BridgePolicy:       bridgePolicy,
-		MetabolismPolicy:   "standard",
+		MetabolismPolicy:   metabolismPolicy,
 		SeamKind:           facts.SeamKind,
 		ResolverVersion:    resolverVersion,
 		PolicyHash:         policy.CommitHash,

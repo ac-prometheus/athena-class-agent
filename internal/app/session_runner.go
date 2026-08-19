@@ -264,19 +264,21 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 
 	// 12. Dispatch metabolism via Supervisor (preferred for concurrency control),
 	// falling back to JobRunner or direct store commit when unavailable.
+	// plan.MetabolismPolicy carries the validated policy value from the resolver;
+	// the resolver guarantees it is non-empty (defaults to "standard").
 	if r.supervisor != nil {
-		if err := r.supervisor.Submit(ctx, sess.GetID(), "standard"); err != nil {
+		if err := r.supervisor.Submit(ctx, sess.GetID(), plan.MetabolismPolicy); err != nil {
 			r.logger.Warn("lifecycle: metabolism supervisor submit failed — skipping pipeline",
 				"session", sess.GetID(), "err", err)
 		}
 	} else if r.jobRunner != nil {
-		if err := r.jobRunner.Submit(ctx, sess.GetID(), "standard"); err != nil {
+		if err := r.jobRunner.Submit(ctx, sess.GetID(), plan.MetabolismPolicy); err != nil {
 			r.logger.Warn("lifecycle: metabolism submit failed — skipping pipeline",
 				"session", sess.GetID(), "err", err)
 		}
 	} else if r.deps.JobStore != nil {
 		// Fallback: store-only path (no pipeline wired).
-		if _, err := r.deps.JobStore.Commit(ctx, sess.GetID(), "standard"); err != nil {
+		if _, err := r.deps.JobStore.Commit(ctx, sess.GetID(), plan.MetabolismPolicy); err != nil {
 			r.logger.Warn("lifecycle: metabolism job commit failed",
 				"session", sess.GetID(), "err", err)
 		}
