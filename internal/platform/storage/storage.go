@@ -40,6 +40,23 @@ func newID() string {
 		b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
 }
 
+// parseSQLiteTimestamp parses a SQLite TEXT timestamp into time.Time.
+// SQLite stores timestamps as TEXT in "YYYY-MM-DD HH:MM:SS" format via
+// CURRENT_TIMESTAMP. Scanning directly into time.Time fails — always scan
+// as string first and parse through this helper.
+func parseSQLiteTimestamp(s string) (time.Time, error) {
+	for _, layout := range []string{
+		"2006-01-02 15:04:05",
+		time.RFC3339,
+		"2006-01-02T15:04:05Z",
+	} {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("storage: unparseable timestamp %q", s)
+}
+
 // beliefMetaJSON encodes a BeliefMeta into the belief_meta JSON column format.
 func beliefMetaJSON(b *pkg.BeliefMeta) string {
 	if b == nil {

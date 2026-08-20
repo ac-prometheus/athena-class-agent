@@ -70,11 +70,11 @@ func (s *SQLiteStore) QueryLogs(ctx context.Context, sessionID string, limit int
 	for rows.Next() {
 		var e pkg.ExperientialLog
 		var aegisMetaStr string
-		var createdAt time.Time
-		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &e.ContentSource, &aegisMetaStr, &createdAt); err != nil {
+		var createdAtStr string
+		if err := rows.Scan(&e.ID, &e.SessionID, &e.Content, &e.ContentSource, &aegisMetaStr, &createdAtStr); err != nil {
 			return nil, fmt.Errorf("platform: scanning log row: %w", err)
 		}
-		e.CreatedAt = createdAt
+		e.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
 		e.AegisAnnotation = decodeAegisMeta(aegisMetaStr)
 		out = append(out, e)
 	}

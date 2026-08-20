@@ -210,12 +210,12 @@ func (s *SQLiteLifecycleStore) LastCheckpointState(ctx context.Context) (string,
 func (s *SQLiteLifecycleStore) LastWakeAt(ctx context.Context) (time.Time, error) {
 	row := s.db.QueryRowContext(ctx,
 		`SELECT wake_at FROM wake_facts ORDER BY wake_at DESC LIMIT 1`)
-	var wakeAt time.Time
-	if err := row.Scan(&wakeAt); err != nil {
+	var wakeAtStr string
+	if err := row.Scan(&wakeAtStr); err != nil {
 		if err == sql.ErrNoRows {
 			return time.Time{}, nil
 		}
 		return time.Time{}, fmt.Errorf("storage: querying last wake time: %w", err)
 	}
-	return wakeAt, nil
+	return parseSQLiteTimestamp(wakeAtStr)
 }
