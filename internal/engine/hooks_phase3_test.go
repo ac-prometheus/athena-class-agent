@@ -181,6 +181,55 @@ func TestT2LoggerHook_EmptyToolResult_Skipped(t *testing.T) {
 	}
 }
 
+func TestT2LoggerHook_SpecificContentSource_Preserved(t *testing.T) {
+	// ToolResults that carry a specific ContentSource (browser-content, search-result,
+	// forum-content) must be logged with that label — not the generic "tool-result".
+	// This is the core of the WP-C3 fix: vocabulary was dead at T2 ingress; now it's live.
+	store := &mockMemoryStore{}
+	hook := NewT2LoggerHook(store)
+
+	turn := TurnResult{
+		SessionID:  "sess-6",
+		TurnNumber: 6,
+		Content:    "",
+		ToolResults: []pkg.ToolResult{
+			{CallID: "call-browser", Content: "page content", ContentSource: pkg.ContentSourceBrowserContent},
+			{CallID: "call-search", Content: "search results", ContentSource: pkg.ContentSourceSearchResult},
+			{CallID: "call-forum", Content: "forum post", ContentSource: pkg.ContentSourceForumContent},
+			{CallID: "call-internal", Content: "pinboard data"}, // no ContentSource → fallback
+		},
+	}
+
+	if err := hook.Run(context.Background(), turn); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(store.appended) != 4 {
+		t.Fatalf("expected 4 T2 entries, got %d", len(store.appended))
+	}
+
+	byCallID := make(map[string]string, 4)
+	for _, e := range store.appended {
+		// Extract call suffix from ID (format: t2-sess-6-6-<ts>-tool<i>)
+		byCallID[e.Content] = e.ContentSource
+	}
+
+	cases := []struct {
+		content string
+		want    string
+	}{
+		{"page content", pkg.ContentSourceBrowserContent},
+		{"search results", pkg.ContentSourceSearchResult},
+		{"forum post", pkg.ContentSourceForumContent},
+		{"pinboard data", pkg.ContentSourceToolResult},
+	}
+	for _, tc := range cases {
+		got := byCallID[tc.content]
+		if got != tc.want {
+			t.Errorf("content %q: ContentSource = %q, want %q", tc.content, got, tc.want)
+		}
+	}
+}
+
 // TestT2LoggerHook_TurnResultHasToolResults verifies that the engine populates
 // ToolResults on TurnResult so T2LoggerHook can consume them (integration smoke test).
 func TestT2LoggerHook_TurnResultHasToolResults(t *testing.T) {

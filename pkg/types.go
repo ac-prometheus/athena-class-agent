@@ -79,10 +79,16 @@ type ContentBlock struct {
 
 // ToolResult is the output of executing a tool call.
 type ToolResult struct {
-	CallID    string
-	Content   string
-	IsError   bool
-	Terminate bool
+	CallID        string
+	Content       string
+	IsError       bool
+	Terminate     bool
+	// ContentSource is the provenance label for the content this tool returned.
+	// External-content tools (browse_web, search_web, forum readers) set this
+	// so the T2LoggerHook can archive the entry with the correct source tag
+	// instead of the generic "tool-result" fallback.
+	// Handlers that return internal content leave this empty; the hook defaults to "tool-result".
+	ContentSource string
 }
 
 // ExecutionMode controls how a tool participates in parallel batches.
@@ -98,6 +104,12 @@ type ToolMeta struct {
 	ExecMode ExecutionMode
 	Tier     int
 	Keywords []string
+	// ContentSource is the provenance label that the engine copies into ToolResult
+	// for V1 handlers (which return plain strings and cannot set it themselves).
+	// V2 handlers set ContentSource on ToolResult directly; this field is the
+	// registration-time declaration for V1.
+	// Empty means "tool-result" (the default internal label).
+	ContentSource string
 }
 
 // CompletionResponse is the output of an LLM completion call.

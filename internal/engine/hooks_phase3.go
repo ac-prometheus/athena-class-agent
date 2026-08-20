@@ -44,17 +44,25 @@ func (h *T2LoggerHook) Run(ctx context.Context, turn TurnResult) error {
 	}
 
 	// Log tool results as provenance entries (C-2 fix, WP-C3).
-	// Each tool result is a separate T2 entry with content_source="tool-result"
-	// so the compression pipeline can attribute and track provenance.
+	// Each tool result is a separate T2 entry tagged with the tool's own
+	// ContentSource label when available (e.g. "browser-content", "search-result",
+	// "forum-content"). This keeps specific provenance alive through T2 so the
+	// compression pipeline can route and gate content correctly.
+	// Falls back to the generic "tool-result" for internal tools that don't declare
+	// a specific source (pinboard, memory_search, etc.).
 	for i, r := range turn.ToolResults {
 		if r.Content == "" {
 			continue // skip empty tool results — nothing to archive
+		}
+		contentSource := r.ContentSource
+		if contentSource == "" {
+			contentSource = pkg.ContentSourceToolResult
 		}
 		entry := pkg.ExperientialLog{
 			ID:            fmt.Sprintf("t2-%s-%d-%d-tool%d", turn.SessionID, turn.TurnNumber, now, i),
 			SessionID:     turn.SessionID,
 			Content:       r.Content,
-			ContentSource: pkg.ContentSourceToolResult,
+			ContentSource: contentSource,
 		}
 		if err := h.store.AppendExperiential(ctx, entry); err != nil {
 			return fmt.Errorf("tier2-logger: tool-result append failed (turn %d, call %s): %w",

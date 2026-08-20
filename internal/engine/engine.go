@@ -473,6 +473,17 @@ func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg Eng
 		}
 	}
 
+	// Propagate ContentSource from tool metadata when the result doesn't carry one.
+	// V2 handlers set ContentSource on ToolResult directly; V1 handlers return plain
+	// strings, so the engine reads the declared ContentSource from ToolMeta (set at
+	// registration via RegisterExternal). This keeps the registration-site declaration
+	// DRY — callers of RegisterExternal only specify the label once.
+	if result.ContentSource == "" {
+		if meta, ok := e.registry.GetMeta(tc.Name); ok && meta.ContentSource != "" {
+			result.ContentSource = meta.ContentSource
+		}
+	}
+
 	if execErr != nil {
 		if toolCtx.Err() == context.DeadlineExceeded {
 			result.Content = fmt.Sprintf("Error: tool %q timed out after %v", tc.Name, cfg.ToolTimeout)

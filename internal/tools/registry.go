@@ -15,11 +15,12 @@ type Definer interface {
 
 // DefaultRegistry is a thread-safe implementation of pkg.ToolRegistry.
 type DefaultRegistry struct {
-	mu        sync.RWMutex
-	handlers  map[string]pkg.ToolHandler
-	tiers     map[string]int
-	keywords  map[string][]string
-	execModes map[string]pkg.ExecutionMode
+	mu             sync.RWMutex
+	handlers       map[string]pkg.ToolHandler
+	tiers          map[string]int
+	keywords       map[string][]string
+	execModes      map[string]pkg.ExecutionMode
+	contentSources map[string]string // tool name → ContentSource label; "" means "tool-result"
 }
 
 // Compile-time check.
@@ -28,10 +29,11 @@ var _ pkg.ToolRegistry = (*DefaultRegistry)(nil)
 // NewDefaultRegistry returns an empty registry.
 func NewDefaultRegistry() *DefaultRegistry {
 	return &DefaultRegistry{
-		handlers:  make(map[string]pkg.ToolHandler),
-		tiers:     make(map[string]int),
-		keywords:  make(map[string][]string),
-		execModes: make(map[string]pkg.ExecutionMode),
+		handlers:       make(map[string]pkg.ToolHandler),
+		tiers:          make(map[string]int),
+		keywords:       make(map[string][]string),
+		execModes:      make(map[string]pkg.ExecutionMode),
+		contentSources: make(map[string]string),
 	}
 }
 
@@ -48,6 +50,18 @@ func (r *DefaultRegistry) RegisterWithMeta(h pkg.ToolHandler, tier int, keywords
 
 // RegisterFull adds h with full metadata including execution mode.
 func (r *DefaultRegistry) RegisterFull(h pkg.ToolHandler, tier int, keywords []string, mode pkg.ExecutionMode) {
+	r.registerFull(h, tier, keywords, mode, "")
+}
+
+// RegisterExternal adds h with full metadata plus a ContentSource label for
+// external-content tools (e.g. browse_web → "browser-content"). The label is
+// copied into ToolResult by the engine for V1 handlers so T2LoggerHook archives
+// the correct provenance instead of the generic "tool-result" fallback.
+func (r *DefaultRegistry) RegisterExternal(h pkg.ToolHandler, tier int, keywords []string, contentSource string) {
+	r.registerFull(h, tier, keywords, pkg.ExecParallel, contentSource)
+}
+
+func (r *DefaultRegistry) registerFull(h pkg.ToolHandler, tier int, keywords []string, mode pkg.ExecutionMode, contentSource string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	name := h.Name()
@@ -58,6 +72,9 @@ func (r *DefaultRegistry) RegisterFull(h pkg.ToolHandler, tier int, keywords []s
 	r.tiers[name] = tier
 	r.keywords[name] = keywords
 	r.execModes[name] = mode
+	if contentSource != "" {
+		r.contentSources[name] = contentSource
+	}
 }
 
 // Get returns the handler for name, if present.
@@ -80,9 +97,10 @@ func (r *DefaultRegistry) GetMeta(name string) (pkg.ToolMeta, bool) {
 		mode = pkg.ExecParallel
 	}
 	return pkg.ToolMeta{
-		ExecMode: mode,
-		Tier:     r.tiers[name],
-		Keywords: r.keywords[name],
+		ExecMode:      mode,
+		Tier:          r.tiers[name],
+		Keywords:      r.keywords[name],
+		ContentSource: r.contentSources[name],
 	}, true
 }
 
