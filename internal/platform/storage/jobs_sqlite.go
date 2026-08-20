@@ -125,7 +125,7 @@ func (s *SQLiteJobStore) Recoverable(ctx context.Context, maxRetries int) ([]pkg
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, session_id, retry_count
 		 FROM metabolism_jobs
-		 WHERE status IN ('pending', 'running', 'failed') AND retry_count < ?
+		 WHERE status IN ('pending', 'running', 'failed') AND retry_count < ? AND claim_count < 5
 		 ORDER BY created_at ASC`,
 		maxRetries,
 	)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ac-prometheus/athena-class-agent/internal/platform"
 	"github.com/ac-prometheus/athena-class-agent/pkg"
@@ -94,12 +95,14 @@ func (s *SQLiteConsolidationStore) UncoveredLogs(ctx context.Context, sessionID 
 	for rows.Next() {
 		var log pkg.ExperientialLog
 		var aegisMetaStr string
+		var createdAtStr string
 		if err := rows.Scan(
 			&log.ID, &log.SessionID, &log.Content,
-			&log.ContentSource, &aegisMetaStr, &log.CreatedAt,
+			&log.ContentSource, &aegisMetaStr, &createdAtStr,
 		); err != nil {
 			return nil, fmt.Errorf("storage: scanning uncovered log: %w", err)
 		}
+		log.CreatedAt, _ = time.Parse("2006-01-02 15:04:05", createdAtStr)
 		log.AegisAnnotation = decodeAegisMeta(aegisMetaStr)
 		logs = append(logs, log)
 	}

@@ -237,9 +237,11 @@ func TestClaimFence_ConcurrentRace(t *testing.T) {
 	}
 	wg.Wait()
 
-	// With SetMaxOpenConns(1), the claims are serialized — the first
-	// succeeds and the second sees a non-stale running job and gets
-	// ErrJobNotPending. Exactly one token should be returned.
+	// SQLite serializes concurrent writes regardless of MaxOpenConns —
+	// the first claim succeeds and the second sees a non-stale running
+	// job (freshly updated started_at) and gets ErrJobNotPending.
+	// A true concurrent race requires PostgreSQL; this test verifies
+	// the contract (exactly one winner) under SQLite's serialization.
 	if len(tokens) != 1 {
 		t.Errorf("expected exactly 1 successful claim, got %d (errors: %v)", len(tokens), errors)
 	}
@@ -272,7 +274,7 @@ func TestPipeline_AtomicRollbackOnFailure(t *testing.T) {
 	// regardless of outcome.
 
 	var t3Count int
-	rawDB.QueryRow(`SELECT COUNT(*) FROM tier3_narratives WHERE session_id = 'session-atomic'`).Scan(&t3Count)
+	rawDB.QueryRow(`SELECT COUNT(*) FROM narrative_summaries WHERE session_id = 'session-atomic'`).Scan(&t3Count)
 
 	if err != nil {
 		// If pipeline errored, there must be zero T3 rows.
