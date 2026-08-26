@@ -109,13 +109,16 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 			deps.ConsolidationStore = storage.NewSQLiteConsolidationStore(deps.DB)
 			deps.LifecycleStore = storage.NewSQLiteLifecycleStore(deps.DB)
 			deps.AssemblyStore = storage.NewSQLiteAssemblyStore(deps.DB)
+		case "postgres":
+			deps.JobStore = storage.NewPostgresJobStore(deps.DB)
+			deps.ConsolidationStore = storage.NewPostgresConsolidationStore(deps.DB)
+			deps.LifecycleStore = storage.NewPostgresLifecycleStore(deps.DB)
+			deps.AssemblyStore = storage.NewPostgresAssemblyStore(deps.DB)
 		default:
-			// PostgreSQL repository implementations are not yet available.
-			// Silently falling back to SQLite stores for a PostgreSQL connection
-			// would corrupt data (wrong placeholder syntax, wrong dialect).
-			// Return an honest error so the operator knows what is actually required.
-			// PostgreSQL support is tracked in HARN-73.
-			return nil, fmt.Errorf("app: postgres driver not yet supported — sqlite3 required for current profiles (driver=%q)", driverName)
+			// Unknown database driver.
+			// PostgreSQL support was added in Phase 4F.
+			// Supported drivers: sqlite3, postgres
+			return nil, fmt.Errorf("app: unsupported database driver %q (supported: sqlite3, postgres)", driverName)
 		}
 	}
 

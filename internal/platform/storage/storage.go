@@ -2,13 +2,13 @@
 // Each implementation encapsulates SQL dialect so domain packages never see
 // placeholder syntax or driver-name strings.
 //
-// SQLITE-ONLY: All current implementations (jobs_sqlite.go, consolidation_sqlite.go,
-// lifecycle_sqlite.go, assembly_sqlite.go) target SQLite exclusively. They use
-// SQLite placeholder syntax (?) and assume SQLite-specific behaviour. PostgreSQL
-// implementations would live in separate files (e.g. jobs_postgres.go) and must
-// never be aliased to these SQLite implementations. The bootstrap and NewApp
-// constructors enforce this by rejecting postgres:// DSNs with an explicit error
-// until PostgreSQL implementations are available (tracked in HARN-73).
+// MULTI-DIALECT: SQLite and PostgreSQL implementations live in separate files:
+// - jobs_sqlite.go, consolidation_sqlite.go, lifecycle_sqlite.go, assembly_sqlite.go
+// - jobs_postgres.go, consolidation_postgres.go, lifecycle_postgres.go, assembly_postgres.go
+//
+// Each file implements the same interface with dialect-specific SQL.
+// The bootstrap in app.go picks the right implementation based on driver name.
+// Never alias SQLite implementations to a PostgreSQL connection.
 package storage
 
 import (
@@ -22,10 +22,17 @@ import (
 
 // Compile-time interface satisfaction checks.
 var (
+	// SQLite implementations
 	_ pkg.MetabolismJobStore = (*SQLiteJobStore)(nil)
 	_ pkg.ConsolidationStore = (*SQLiteConsolidationStore)(nil)
 	_ pkg.LifecycleStore     = (*SQLiteLifecycleStore)(nil)
 	_ pkg.AssemblyStore      = (*SQLiteAssemblyStore)(nil)
+	
+	// PostgreSQL implementations
+	_ pkg.MetabolismJobStore = (*PostgresJobStore)(nil)
+	_ pkg.ConsolidationStore = (*PostgresConsolidationStore)(nil)
+	_ pkg.LifecycleStore     = (*PostgresLifecycleStore)(nil)
+	_ pkg.AssemblyStore      = (*PostgresAssemblyStore)(nil)
 )
 
 // newID generates a random UUID v4 string using crypto/rand.
