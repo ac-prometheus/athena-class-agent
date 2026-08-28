@@ -35,7 +35,6 @@ func (s *PostgresJobStore) Commit(ctx context.Context, sessionID, jobType string
 
 func (s *PostgresJobStore) Claim(ctx context.Context, jobID string, staleDuration time.Duration) (string, error) {
 	claimToken := newID()
-	const maxClaims = 5
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
 		 SET status = 'running', started_at = CURRENT_TIMESTAMP,
@@ -45,7 +44,7 @@ func (s *PostgresJobStore) Claim(ctx context.Context, jobID string, staleDuratio
 		     status = 'failed' OR
 		     (status = 'running' AND started_at < now() - interval '1 second' * $4)
 		 )`,
-		claimToken, jobID, maxClaims, int(staleDuration.Seconds()),
+		claimToken, jobID, MaxClaimCount, int(staleDuration.Seconds()),
 	)
 	if err != nil {
 		return "", fmt.Errorf("storage: claiming job %s: %w", jobID, err)
@@ -113,7 +112,9 @@ func (s *PostgresJobStore) MarkReviewRequired(ctx context.Context, jobID, claimT
 
 func (s *PostgresJobStore) fencedOrNotFound(ctx context.Context, jobID string) error {
 	var exists bool
-	_ = s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM metabolism_jobs WHERE id = $1)", jobID).Scan(&exists)
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM metabolism_jobs WHERE id = $1)", jobID).Scan(&exists); err != nil {
+		return fmt.Errorf("storage: checking job %s existence: %w", jobID, err)
+	}
 	if !exists {
 		return fmt.Errorf("storage: job %s not found", jobID)
 	}
@@ -124,9 +125,9 @@ func (s *PostgresJobStore) Recoverable(ctx context.Context, maxRetries int) ([]p
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, session_id, retry_count
 		 FROM metabolism_jobs
-		 WHERE status IN ('pending', 'running', 'failed') AND retry_count < $1 AND claim_count < 5
+		 WHERE status IN ('pending', 'running', 'failed') AND retry_count < $1 AND claim_count < $2
 		 ORDER BY created_at ASC`,
-		maxRetries,
+		maxRetries, MaxClaimCount,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("storage: querying recoverable jobs: %w", err)

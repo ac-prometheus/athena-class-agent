@@ -10,6 +10,12 @@ import (
 	"github.com/ac-prometheus/athena-class-agent/pkg"
 )
 
+// MaxClaimCount is the maximum number of times a job can be claimed before
+// it's considered exhausted. Bounds the crash-recovery loop for jobs that
+// deterministically fail before reaching Fail(). Used by both Claim (WHERE
+// guard) and Recoverable (filter).
+const MaxClaimCount = 5
+
 // SQLiteJobStore implements pkg.MetabolismJobStore for SQLite.
 type SQLiteJobStore struct {
 	db platform.DB
@@ -36,7 +42,6 @@ func (s *SQLiteJobStore) Commit(ctx context.Context, sessionID, jobType string) 
 func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string, staleDuration time.Duration) (string, error) {
 	claimToken := newID()
 	staleThreshold := fmt.Sprintf("-%d seconds", int(staleDuration.Seconds()))
-	const maxClaims = 5
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE metabolism_jobs
 		 SET status = 'running', started_at = CURRENT_TIMESTAMP,
@@ -46,7 +51,7 @@ func (s *SQLiteJobStore) Claim(ctx context.Context, jobID string, staleDuration 
 		     status = 'failed' OR
 		     (status = 'running' AND started_at < datetime('now', ?))
 		 )`,
-		claimToken, jobID, maxClaims, staleThreshold,
+		claimToken, jobID, MaxClaimCount, staleThreshold,
 	)
 	if err != nil {
 		return "", fmt.Errorf("storage: claiming job %s: %w", jobID, err)
@@ -114,7 +119,9 @@ func (s *SQLiteJobStore) MarkReviewRequired(ctx context.Context, jobID, claimTok
 
 func (s *SQLiteJobStore) fencedOrNotFound(ctx context.Context, jobID string) error {
 	var exists bool
-	_ = s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM metabolism_jobs WHERE id = ?)", jobID).Scan(&exists)
+	if err := s.db.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM metabolism_jobs WHERE id = ?)", jobID).Scan(&exists); err != nil {
+		return fmt.Errorf("storage: checking job %s existence: %w", jobID, err)
+	}
 	if !exists {
 		return fmt.Errorf("storage: job %s not found", jobID)
 	}
@@ -125,9 +132,9 @@ func (s *SQLiteJobStore) Recoverable(ctx context.Context, maxRetries int) ([]pkg
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT id, session_id, retry_count
 		 FROM metabolism_jobs
-		 WHERE status IN ('pending', 'running', 'failed') AND retry_count < ? AND claim_count < 5
+		 WHERE status IN ('pending', 'running', 'failed') AND retry_count < ? AND claim_count < ?
 		 ORDER BY created_at ASC`,
-		maxRetries,
+		maxRetries, MaxClaimCount,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("storage: querying recoverable jobs: %w", err)
