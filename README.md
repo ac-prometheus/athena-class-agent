@@ -48,6 +48,7 @@ These components are wired in `NewApp` but depend on external configuration. The
 
 These components exist as code and are architecturally complete, but are not instantiated in `NewApp` yet. They are not dead code — they are next on the integration path.
 
+- **Operator TUI** -- Current `athena` CLI usability is basically a blocker.
 - **Anthropic and Gemini LLM backends** — the architecture supports them, and client code lives under `internal/engine/`. `NewApp` currently rejects any provider other than `openai`; extending this is straightforward once the provider-selection layer is built out. Tracked in Phase 7 / Sprint 4+.
 - **PostgreSQL backend** — repository store implementations for Postgres are not yet written. `NewApp` returns a clear error if a non-SQLite DSN is provided (`sqlite3 required for current profiles`). Tracked in HARN-73.
 - **Peripheral Awareness tracker** — `PeripheralAwarenessHook` (EWMA centroid tracking, cosine velocity, jittered drift threshold, convergence spiral detection) is implemented in `internal/engine/hooks_phase3.go` and `internal/awareness/peripheral.go` but is not instantiated in `NewApp`. Bridge synthesis and grounding, which share the awareness package, *are* wired.
