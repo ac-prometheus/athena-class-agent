@@ -80,6 +80,23 @@ func (c *OpenAICompatClient) Complete(ctx context.Context, req pkg.CompletionReq
 	if c.thinkingMode {
 		body["extra_body"] = map[string]any{"enable_thinking": true}
 	}
+	if len(req.Tools) > 0 {
+		var tools []map[string]any
+		for _, t := range req.Tools {
+			fn := map[string]any{
+				"name":        t.Name,
+				"description": t.Description,
+			}
+			if t.Parameters != nil {
+				fn["parameters"] = t.Parameters
+			}
+			tools = append(tools, map[string]any{
+				"type":     "function",
+				"function": fn,
+			})
+		}
+		body["tools"] = tools
+	}
 
 	bodyBytes, err := json.Marshal(body)
 	if err != nil {

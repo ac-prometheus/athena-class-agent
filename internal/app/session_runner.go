@@ -228,7 +228,7 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 		return nil
 	}))
 
-	eng := engine.NewEngine(r.deps.LLM, nil, hooks)
+	eng := engine.NewEngine(r.deps.LLM, r.deps.ToolRegistry, hooks)
 	eng.WithSessionID(sess.GetID())
 	if r.deps.Gateway != nil {
 		eng.WithAegis(r.deps.Gateway)
@@ -284,6 +284,14 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 			{Role: "user", Content: initialContent},
 		},
 		MaxTokens: 4096,
+	}
+
+	if r.deps.ToolRegistry != nil {
+		var toolDefs []pkg.ToolDef
+		for _, group := range r.deps.ToolRegistry.List() {
+			toolDefs = append(toolDefs, group.Tools...)
+		}
+		req.Tools = toolDefs
 	}
 
 	loopResult, err := eng.RunLoop(ctx, req, engine.EngineConfig{

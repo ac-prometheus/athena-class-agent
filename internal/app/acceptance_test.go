@@ -1329,3 +1329,25 @@ func (h *selfExamineStub) Execute(_ context.Context, args map[string]any) (strin
 	return fmt.Sprintf("Advisor examination (not stored):\n\n%s", content), nil
 }
 
+
+// ---------------------------------------------------------------------------
+// WP3: Tool registry wired in production
+// ---------------------------------------------------------------------------
+
+func TestAcceptance_Production_ToolRegistryWired(t *testing.T) {
+	rawDB, pdb := acceptanceDB(t)
+	application := acceptanceProductionApp(t, rawDB, pdb)
+
+	if application.Dependencies.ToolRegistry == nil {
+		t.Fatal("ToolRegistry is nil in production profile — tools cannot dispatch")
+	}
+	groups := application.Dependencies.ToolRegistry.List()
+	if len(groups) == 0 {
+		t.Error("ToolRegistry has no registered tool groups")
+	}
+
+	// Verify discover_tools is present (tier-1 baseline).
+	if _, ok := application.Dependencies.ToolRegistry.Get("discover_tools"); !ok {
+		t.Error("ToolRegistry missing discover_tools handler")
+	}
+}
