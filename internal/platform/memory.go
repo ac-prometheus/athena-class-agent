@@ -162,6 +162,30 @@ func (s *SQLiteStore) SearchReflections(ctx context.Context, _ []float32, limit 
 	return out, rows.Err()
 }
 
+// GetReflectionByID returns a single T4 reflection by its stable ID.
+// Used by contradiction retrieval to resolve edge targets directly instead
+// of scanning the N most recent reflections.
+func (s *SQLiteStore) GetReflectionByID(ctx context.Context, id string) (*pkg.Reflection, error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT id, content, visibility, belief_meta, base_confidence
+		 FROM reflections WHERE id = ?`, id)
+	var r pkg.Reflection
+	var metaJSON string
+	var baseConf sql.NullFloat64
+	if err := row.Scan(&r.ID, &r.Content, &r.Visibility, &metaJSON, &baseConf); err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var bc *float64
+	if baseConf.Valid {
+		bc = &baseConf.Float64
+	}
+	r.Belief = decodeBelief(metaJSON, bc)
+	return &r, nil
+}
+
 // SearchEntities returns T5 entities matching the query string (simple LIKE).
 func (s *SQLiteStore) SearchEntities(ctx context.Context, query string, limit int) ([]pkg.Entity, error) {
 	like := "%" + escapeLike(query) + "%"
@@ -393,6 +417,24 @@ func (p *PostgresStore) SearchReflections(ctx context.Context, _ []float32, limi
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// GetReflectionByID returns a single T4 reflection by its stable ID.
+func (p *PostgresStore) GetReflectionByID(ctx context.Context, id string) (*pkg.Reflection, error) {
+	row := p.pool.QueryRow(ctx,
+		`SELECT id, content, visibility, belief_meta::text, base_confidence
+		 FROM reflections WHERE id = $1`, id)
+	var r pkg.Reflection
+	var metaJSON string
+	var baseConf *float64
+	if err := row.Scan(&r.ID, &r.Content, &r.Visibility, &metaJSON, &baseConf); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	r.Belief = decodeBelief(metaJSON, baseConf)
+	return &r, nil
 }
 
 // SearchEntities returns T5 entities matching the query string.

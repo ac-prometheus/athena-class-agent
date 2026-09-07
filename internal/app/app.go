@@ -31,7 +31,7 @@ type App struct {
 	Config       *platform.Config
 	Profile      RuntimeProfile
 	Dependencies *Dependencies
-	Runner       *SessionRunner
+	Runner       SessionRunnerIface
 	Supervisor   *metabolism.Supervisor
 	Daemon       *daemon.Daemon
 }
@@ -318,7 +318,7 @@ func NewApp(cfg *platform.Config, profile RuntimeProfile, opts ...Option) (*App,
 		Config:       cfg,
 		Profile:      profile,
 		Dependencies: deps,
-		Runner:       runner,
+		Runner:       sessionRunner,
 		Supervisor:   supervisor,
 		Daemon:       d,
 	}, nil

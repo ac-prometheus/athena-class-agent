@@ -33,6 +33,14 @@ func (s *stubReflectStore) SearchReflections(_ context.Context, _ []float32, lim
 	}
 	return s.reflections, nil
 }
+func (s *stubReflectStore) GetReflectionByID(_ context.Context, id string) (*pkg.Reflection, error) {
+	for i := range s.reflections {
+		if s.reflections[i].ID == id {
+			return &s.reflections[i], nil
+		}
+	}
+	return nil, nil
+}
 func (s *stubReflectStore) InsertReflection(_ context.Context, r pkg.Reflection) error {
 	s.reflections = append(s.reflections, r)
 	return nil

@@ -70,7 +70,9 @@ func (p *EchoPoolPhase) Assemble(ctx context.Context, cfg *AssembleConfig, manif
 }
 
 // findContradiction queries memory_edges for contradicts edges linked to any echo pool member
-// and returns the first contradicting belief's ID and content.
+// and returns the first contradicting belief's ID and content. Resolves edge targets by
+// direct point lookup (GetReflectionByID) rather than scanning recent reflections, so
+// targets are reachable regardless of T4 size.
 func findContradiction(ctx context.Context, cfg *AssembleConfig, echoIDs []string) (id, content string, found bool) {
 	for _, echoID := range echoIDs {
 		edges, err := cfg.edges.GetEdges(ctx, echoID, "from")
@@ -81,16 +83,11 @@ func findContradiction(ctx context.Context, cfg *AssembleConfig, echoIDs []strin
 			if e.EdgeType != "contradicts" {
 				continue
 			}
-			// Fetch the contradicting belief from T4.
-			reflections, err := cfg.store.SearchReflections(ctx, nil, 20)
-			if err != nil {
+			r, err := cfg.store.GetReflectionByID(ctx, e.ToID)
+			if err != nil || r == nil {
 				continue
 			}
-			for _, r := range reflections {
-				if r.ID == e.ToID {
-					return r.ID, r.Content, true
-				}
-			}
+			return r.ID, r.Content, true
 		}
 	}
 	return "", "", false

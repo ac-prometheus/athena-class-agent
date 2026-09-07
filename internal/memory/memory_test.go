@@ -57,6 +57,15 @@ func (m *mockStore) SearchReflections(_ context.Context, _ []float32, limit int)
 	return m.reflections, nil
 }
 
+func (m *mockStore) GetReflectionByID(_ context.Context, id string) (*pkg.Reflection, error) {
+	for i := range m.reflections {
+		if m.reflections[i].ID == id {
+			return &m.reflections[i], nil
+		}
+	}
+	return nil, nil
+}
+
 func (m *mockStore) InsertReflection(_ context.Context, r pkg.Reflection) error {
 	if m.insertRefErr != nil {
 		return m.insertRefErr

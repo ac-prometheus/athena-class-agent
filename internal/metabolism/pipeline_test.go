@@ -73,6 +73,9 @@ func (m *mockMemoryStore) InsertNarrative(_ context.Context, s pkg.NarrativeSumm
 func (m *mockMemoryStore) SearchReflections(_ context.Context, _ []float32, _ int) ([]pkg.Reflection, error) {
 	return nil, nil
 }
+func (m *mockMemoryStore) GetReflectionByID(_ context.Context, _ string) (*pkg.Reflection, error) {
+	return nil, nil
+}
 func (m *mockMemoryStore) InsertReflection(_ context.Context, _ pkg.Reflection) error { return nil }
 func (m *mockMemoryStore) SearchEntities(_ context.Context, _ string, _ int) ([]pkg.Entity, error) {
 	return nil, nil

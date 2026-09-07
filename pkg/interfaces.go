@@ -264,6 +264,7 @@ type MemoryStore interface {
 
 	// T4 — agent-authored reflections
 	SearchReflections(ctx context.Context, embedding []float32, limit int) ([]Reflection, error)
+	GetReflectionByID(ctx context.Context, id string) (*Reflection, error)
 	InsertReflection(ctx context.Context, ref Reflection) error
 
 	// T5 — world model

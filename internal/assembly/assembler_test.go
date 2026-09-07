@@ -2,6 +2,7 @@ package assembly
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -205,5 +206,130 @@ func TestTokenBudget_ZeroTotal(t *testing.T) {
 	level := b.Add(100, 100)
 	if level != BudgetOK {
 		t.Errorf("zero-total budget: level = %d, want BudgetOK (no-op budget)", level)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HARN-104: findContradiction regression test — point lookup by ID
+// ---------------------------------------------------------------------------
+
+type stubMemoryStoreForEcho struct {
+	reflections map[string]*pkg.Reflection
+}
+
+func (s *stubMemoryStoreForEcho) AppendExperiential(_ context.Context, _ pkg.ExperientialLog) error {
+	return nil
+}
+func (s *stubMemoryStoreForEcho) SearchNarrative(_ context.Context, _ []float32, _ int) ([]pkg.NarrativeSummary, error) {
+	return nil, nil
+}
+func (s *stubMemoryStoreForEcho) InsertNarrative(_ context.Context, _ pkg.NarrativeSummary) error {
+	return nil
+}
+func (s *stubMemoryStoreForEcho) SearchReflections(_ context.Context, _ []float32, limit int) ([]pkg.Reflection, error) {
+	// Only return up to limit most recent — simulates the old bug
+	var out []pkg.Reflection
+	for _, r := range s.reflections {
+		out = append(out, *r)
+		if len(out) >= limit {
+			break
+		}
+	}
+	return out, nil
+}
+func (s *stubMemoryStoreForEcho) GetReflectionByID(_ context.Context, id string) (*pkg.Reflection, error) {
+	r, ok := s.reflections[id]
+	if !ok {
+		return nil, nil
+	}
+	return r, nil
+}
+func (s *stubMemoryStoreForEcho) InsertReflection(_ context.Context, ref pkg.Reflection) error {
+	s.reflections[ref.ID] = &ref
+	return nil
+}
+func (s *stubMemoryStoreForEcho) SearchEntities(_ context.Context, _ string, _ int) ([]pkg.Entity, error) {
+	return nil, nil
+}
+func (s *stubMemoryStoreForEcho) UpsertEntity(_ context.Context, _ pkg.Entity) error { return nil }
+func (s *stubMemoryStoreForEcho) GetProfile(_ context.Context, _ string) (*pkg.RelationalProfile, error) {
+	return nil, nil
+}
+func (s *stubMemoryStoreForEcho) ListProfiles(_ context.Context) ([]pkg.RelationalProfile, error) {
+	return nil, nil
+}
+func (s *stubMemoryStoreForEcho) Close() error { return nil }
+
+type stubEdgeStoreForEcho struct {
+	edges map[string][]pkg.MemoryEdge
+}
+
+func (s *stubEdgeStoreForEcho) CreateEdge(_ context.Context, fromID, toID string, fromTier, toTier int, edgeType, author string) error {
+	s.edges[fromID] = append(s.edges[fromID], pkg.MemoryEdge{
+		FromID: fromID, ToID: toID, FromTier: fromTier, ToTier: toTier, EdgeType: edgeType, Author: author,
+	})
+	return nil
+}
+func (s *stubEdgeStoreForEcho) GetEdges(_ context.Context, recordID, direction string) ([]pkg.MemoryEdge, error) {
+	return s.edges[recordID], nil
+}
+func (s *stubEdgeStoreForEcho) FetchDownstreamEdges(_ context.Context, _ string) ([]pkg.EdgeNode, error) {
+	return nil, nil
+}
+
+func TestFindContradiction_OldReflectionReachable(t *testing.T) {
+	// Create 30 reflections — target is the oldest (index 0)
+	store := &stubMemoryStoreForEcho{reflections: make(map[string]*pkg.Reflection)}
+	for i := 0; i < 30; i++ {
+		id := fmt.Sprintf("ref-%03d", i)
+		store.reflections[id] = &pkg.Reflection{
+			ID:      id,
+			Content: fmt.Sprintf("reflection content %d", i),
+		}
+	}
+
+	// The oldest reflection is the contradiction target
+	targetID := "ref-000"
+
+	// Create an edge: echo source → contradicts → oldest reflection
+	edges := &stubEdgeStoreForEcho{edges: make(map[string][]pkg.MemoryEdge)}
+	edges.edges["echo-source"] = []pkg.MemoryEdge{
+		{FromID: "echo-source", ToID: targetID, EdgeType: "contradicts"},
+	}
+
+	cfg := &AssembleConfig{
+		store: store,
+		edges: edges,
+	}
+
+	id, content, found := findContradiction(context.Background(), cfg, []string{"echo-source"})
+	if !found {
+		t.Fatal("findContradiction did not find the oldest reflection — HARN-104 regression")
+	}
+	if id != targetID {
+		t.Errorf("found ID = %q, want %q", id, targetID)
+	}
+	if content != "reflection content 0" {
+		t.Errorf("found content = %q, want %q", content, "reflection content 0")
+	}
+}
+
+func TestFindContradiction_MissingTarget(t *testing.T) {
+	store := &stubMemoryStoreForEcho{reflections: make(map[string]*pkg.Reflection)}
+	store.reflections["ref-001"] = &pkg.Reflection{ID: "ref-001", Content: "exists"}
+
+	edges := &stubEdgeStoreForEcho{edges: make(map[string][]pkg.MemoryEdge)}
+	edges.edges["echo-source"] = []pkg.MemoryEdge{
+		{FromID: "echo-source", ToID: "ref-nonexistent", EdgeType: "contradicts"},
+	}
+
+	cfg := &AssembleConfig{
+		store: store,
+		edges: edges,
+	}
+
+	_, _, found := findContradiction(context.Background(), cfg, []string{"echo-source"})
+	if found {
+		t.Error("findContradiction should return false for nonexistent target")
 	}
 }
