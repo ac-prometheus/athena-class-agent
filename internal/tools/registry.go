@@ -96,11 +96,16 @@ func (r *DefaultRegistry) GetMeta(name string) (pkg.ToolMeta, bool) {
 	if mode == "" {
 		mode = pkg.ExecParallel
 	}
+	dest := "internal"
+	if cs := r.contentSources[name]; cs != "" && cs != "tool-result" && cs != "self" && cs != "operator" {
+		dest = "external"
+	}
 	return pkg.ToolMeta{
 		ExecMode:      mode,
 		Tier:          r.tiers[name],
 		Keywords:      r.keywords[name],
 		ContentSource: r.contentSources[name],
+		Destination:   dest,
 	}, true
 }
 

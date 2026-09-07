@@ -173,12 +173,37 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 					return nil, nil // don't block on review errors (invariant 3)
 				}
 				if !report.Clean {
+					// Destination × severity matrix: block only external + critical.
+					if tc.Destination == "external" && report.Severity == "critical" {
+						blocked := pkg.BlockedOutbound{
+							ToolName:    tc.Name,
+							CallID:      tc.ID,
+							Destination: tc.Destination,
+							Severity:    report.Severity,
+							Findings:    report.Findings,
+							Reason:      fmt.Sprintf("aegis: critical outbound findings blocked for external tool %s", tc.Name),
+						}
+						blockedJSON, _ := json.Marshal(blocked)
+						blockedResult := *result
+						blockedResult.Content = fmt.Sprintf("[BLOCKED: outbound content blocked by Aegis]\n%s", string(blockedJSON))
+						blockedResult.IsError = true
+						cfg.emit(pkg.EngineEventHookBlock, e.sessionID, map[string]any{
+							"tool": tc.Name, "call_id": tc.ID,
+							"reason": "aegis_outbound_critical", "destination": tc.Destination,
+							"severity": report.Severity,
+						})
+						slog.Warn("engine: aegis BLOCKED outbound — critical findings on external tool",
+							"tool", tc.Name, "destination", tc.Destination,
+							"severity", report.Severity, "findings", report.Findings)
+						return &blockedResult, nil
+					}
+					// All other cases: annotate only (internal, or non-critical severity).
 					slog.Warn("engine: aegis outbound review findings",
-						"tool", tc.Name, "findings", report.Findings)
-					// Annotate result with findings but don't mutate content.
+						"tool", tc.Name, "findings", report.Findings,
+						"severity", report.Severity, "destination", tc.Destination)
 					annotated := *result
-					annotated.Content = fmt.Sprintf("[aegis: outbound findings: %v]\n%s",
-						report.Findings, result.Content)
+					annotated.Content = fmt.Sprintf("[aegis: outbound findings (%s): %v]\n%s",
+						report.Severity, report.Findings, result.Content)
 					return &annotated, nil
 				}
 				return nil, nil
@@ -476,6 +501,15 @@ func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg Eng
 		result.Content = fmt.Sprintf("Error: unknown tool %q. Available: %s", tc.Name, e.availableToolNames())
 		result.IsError = true
 		return result
+	}
+
+	// Populate destination from tool metadata for Aegis outbound screening.
+	if tc.Destination == "" {
+		if meta, ok := e.registry.GetMeta(tc.Name); ok && meta.Destination != "" {
+			tc.Destination = meta.Destination
+		} else {
+			tc.Destination = "internal"
+		}
 	}
 
 	// 2. Parse arguments.

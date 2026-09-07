@@ -339,6 +339,7 @@ type AnnotatedContent struct {
 type OutboundReport struct {
 	Clean    bool
 	Findings []string // descriptions of detected leaks (API keys, paths, etc.)
+	Severity string   // "info", "warning", "critical" — classification lives in the Aegis pipeline
 }
 
 // ErrTrustNotFound is the sentinel TrustStore implementations must return

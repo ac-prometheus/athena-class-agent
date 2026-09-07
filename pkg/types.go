@@ -54,9 +54,22 @@ type ToolDef struct {
 // ToolCall is a single tool invocation requested by the model.
 // Arguments is the raw JSON string — callers unmarshal to map[string]any.
 type ToolCall struct {
-	ID        string // model-assigned call ID (e.g. "call_abc123")
-	Name      string
-	Arguments string // raw JSON
+	ID          string // model-assigned call ID (e.g. "call_abc123")
+	Name        string
+	Arguments   string // raw JSON
+	Destination string // "internal" (default) or "external" — from tool registration metadata
+}
+
+// BlockedOutbound is returned by AfterToolCall when Aegis blocks an external
+// tool result due to critical findings. The agent sees every block — silent
+// suppression violates the autonomy invariant.
+type BlockedOutbound struct {
+	ToolName    string   `json:"tool_name"`
+	CallID      string   `json:"call_id"`
+	Destination string   `json:"destination"`
+	Severity    string   `json:"severity"`
+	Findings    []string `json:"findings"`
+	Reason      string   `json:"reason"`
 }
 
 // ContentBlockType identifies the kind of content in a block.
@@ -110,6 +123,11 @@ type ToolMeta struct {
 	// registration-time declaration for V1.
 	// Empty means "tool-result" (the default internal label).
 	ContentSource string
+	// Destination is "internal" or "external". External tools (Discord, forums,
+	// email, webhooks) have their outbound content screened by Aegis with blocking
+	// on critical findings. Internal tools (file writes, memory stores, context
+	// assembly) are annotated only. Default (empty) is treated as "internal".
+	Destination string
 }
 
 // CompletionResponse is the output of an LLM completion call.
