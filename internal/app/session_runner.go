@@ -294,6 +294,8 @@ func (r *SessionRunner) RunSession(ctx context.Context, trigger pkg.SessionTrigg
 		req.Tools = toolDefs
 	}
 
+	// EventSink is nil for now — emit-only stage. Phase 5A (TUI) will
+	// populate this with a real sink that feeds the keeper's window.
 	loopResult, err := eng.RunLoop(ctx, req, engine.EngineConfig{
 		MaxIterations: 25,
 		ParallelTools: true,

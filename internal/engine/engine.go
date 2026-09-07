@@ -65,6 +65,24 @@ type EngineConfig struct {
 	// iteration. Enables mid-session compaction: the hook receives the current
 	// history and system prompt and may return transformed versions. Nil = no-op.
 	TransformContext func(ctx context.Context, system string, history []pkg.Message) (string, []pkg.Message, error)
+
+	// EventSink receives structured lifecycle events from the engine loop.
+	// Nil = zero-cost no-op. See pkg.EngineEvent for the contract: sinks
+	// must return immediately and never block. Phase 5A TUI integration point.
+	EventSink pkg.EventSink
+}
+
+// emit sends an engine event to the configured sink. No-op when nil.
+func (cfg *EngineConfig) emit(eventType, sessionID string, data any) {
+	if cfg.EventSink == nil {
+		return
+	}
+	cfg.EventSink(pkg.EngineEvent{
+		Type:      eventType,
+		SessionID: sessionID,
+		Timestamp: time.Now().UnixNano(),
+		Data:      data,
+	})
 }
 
 // LoopResult is the output of Engine.RunLoop.
@@ -175,8 +193,17 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 
 	systemPrompt := req.System
 
+	cfg.emit(pkg.EngineEventSessionStart, e.sessionID, map[string]any{
+		"tools_count": len(req.Tools),
+	})
+
 	for {
 		iterations++
+
+		cfg.emit(pkg.EngineEventTurnStart, e.sessionID, map[string]any{
+			"iteration": iterations,
+			"messages":  len(history),
+		})
 
 		// TransformContext: mid-session compaction hook. Fires after the first
 		// iteration — the first request uses the original context. Subsequent
@@ -203,10 +230,23 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 
 		slog.Info("engine: iteration start", "iteration", iterations, "messages", len(history))
 
+		cfg.emit(pkg.EngineEventLLMRequest, e.sessionID, map[string]any{
+			"iteration": iterations,
+			"messages":  len(history),
+		})
+
 		resp, err := e.client.Complete(ctx, currentReq)
 		if err != nil {
 			return nil, fmt.Errorf("engine: iteration %d: %w", iterations, err)
 		}
+
+		cfg.emit(pkg.EngineEventLLMResponse, e.sessionID, map[string]any{
+			"iteration":         iterations,
+			"finish_reason":     resp.FinishReason,
+			"prompt_tokens":     resp.PromptTokens,
+			"completion_tokens": resp.CompletionTokens,
+			"ttft_ms":           resp.TTFT.Milliseconds(),
+		})
 
 		slog.Info("engine: iteration complete",
 			"iteration", iterations,
@@ -250,6 +290,11 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 					return nil, fmt.Errorf("engine: critical hook error on final turn: %w", err)
 				}
 			}
+			cfg.emit(pkg.EngineEventLoopTerminated, e.sessionID, map[string]any{
+				"iterations": iterations,
+				"terminated": false,
+				"reason":     "no_tool_calls",
+			})
 			return &LoopResult{FinalResponse: resp, History: history, Iterations: iterations}, nil
 		}
 
@@ -281,6 +326,11 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 		}
 
 		if terminated {
+			cfg.emit(pkg.EngineEventLoopTerminated, e.sessionID, map[string]any{
+				"iterations": iterations,
+				"terminated": true,
+				"reason":     "tool_terminate",
+			})
 			return &LoopResult{
 				FinalResponse: resp,
 				History:       history,
@@ -307,6 +357,10 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 					}
 					history = append(history, msg)
 					steeringDrained++
+					cfg.emit(pkg.EngineEventSteeringInjected, e.sessionID, map[string]any{
+						"iteration": iterations,
+						"source":    "steering",
+					})
 					slog.Info("engine: steering message injected", "iteration", iterations, "count", steeringDrained)
 				default:
 					goto steeringDone
@@ -325,6 +379,10 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 					slog.Warn("engine: follow-up message rejected (invalid role)", "role", msg.Role)
 				} else {
 					history = append(history, msg)
+					cfg.emit(pkg.EngineEventSteeringInjected, e.sessionID, map[string]any{
+						"iteration": iterations,
+						"source":    "follow_up",
+					})
 					slog.Info("engine: follow-up message injected", "iteration", iterations)
 				}
 			default:
@@ -332,11 +390,21 @@ func (e *Engine) RunLoop(ctx context.Context, req pkg.CompletionRequest, cfg Eng
 		}
 
 		if cfg.ShouldStop != nil && cfg.ShouldStop(resp, results) {
+			cfg.emit(pkg.EngineEventLoopTerminated, e.sessionID, map[string]any{
+				"iterations": iterations,
+				"terminated": false,
+				"reason":     "should_stop",
+			})
 			return &LoopResult{FinalResponse: resp, History: history, Iterations: iterations}, nil
 		}
 
 		if iterations >= cfg.MaxIterations {
 			slog.Warn("engine: max iterations reached", "max_iterations", cfg.MaxIterations)
+			cfg.emit(pkg.EngineEventLoopTerminated, e.sessionID, map[string]any{
+				"iterations": iterations,
+				"terminated": false,
+				"reason":     "max_iterations",
+			})
 			return &LoopResult{FinalResponse: resp, History: history, Iterations: iterations}, nil
 		}
 	}
@@ -397,7 +465,9 @@ func (e *Engine) executeToolCalls(ctx context.Context, calls []pkg.ToolCall, cfg
 
 // executeSingleTool runs one tool call through the full pipeline:
 // unknown-check → arg parse → BeforeToolCall → execute → AfterToolCall.
+// Emits tool_dispatch/tool_result/hook_block events via the configured sink.
 func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg EngineConfig) pkg.ToolResult {
+	toolStart := time.Now()
 	result := pkg.ToolResult{CallID: tc.ID}
 
 	// 1. Unknown tool → immediate error.
@@ -426,6 +496,11 @@ func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg Eng
 		args = make(map[string]any)
 	}
 
+	cfg.emit(pkg.EngineEventToolDispatch, e.sessionID, map[string]any{
+		"tool":    tc.Name,
+		"call_id": tc.ID,
+	})
+
 	// 3. BeforeToolCall hook (Aegis inbound scan or custom).
 	// Invariant 4: inbound scan must not fail silently. On hook error, block
 	// the tool call and return the error to the model as a tool result.
@@ -433,11 +508,21 @@ func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg Eng
 		hookResult, err := cfg.BeforeToolCall(ctx, tc, args)
 		if err != nil {
 			slog.Warn("engine: BeforeToolCall hook error — blocking execution", "tool", tc.Name, "err", err)
+			cfg.emit(pkg.EngineEventHookBlock, e.sessionID, map[string]any{
+				"tool":    tc.Name,
+				"call_id": tc.ID,
+				"reason":  fmt.Sprintf("hook error: %v", err),
+			})
 			result.Content = fmt.Sprintf("Error: pre-execution check failed: %v", err)
 			result.IsError = true
 			return result
 		}
 		if hookResult != nil && hookResult.Block {
+			cfg.emit(pkg.EngineEventHookBlock, e.sessionID, map[string]any{
+				"tool":    tc.Name,
+				"call_id": tc.ID,
+				"reason":  hookResult.Reason,
+			})
 			result.Content = fmt.Sprintf("Error: %s", hookResult.Reason)
 			result.IsError = true
 			return result
@@ -506,6 +591,18 @@ func (e *Engine) executeSingleTool(ctx context.Context, tc pkg.ToolCall, cfg Eng
 			result = *mutated
 		}
 	}
+
+	preview := result.Content
+	if len(preview) > 200 {
+		preview = preview[:200] + "…"
+	}
+	cfg.emit(pkg.EngineEventToolResult, e.sessionID, map[string]any{
+		"tool":       tc.Name,
+		"call_id":    tc.ID,
+		"duration_ms": time.Since(toolStart).Milliseconds(),
+		"is_error":   result.IsError,
+		"preview":    preview,
+	})
 
 	return result
 }
