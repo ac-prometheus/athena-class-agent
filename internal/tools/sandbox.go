@@ -23,13 +23,17 @@ const (
 	SandboxModePermissive SandboxMode = "permissive"
 )
 
+// DefaultMaxOutputBytes is the default cap for tool output (1MB).
+const DefaultMaxOutputBytes = 1 << 20
+
 // SandboxConfig is the configuration for a Sandbox instance.
 type SandboxConfig struct {
-	Mode          SandboxMode
-	AllowedPaths  []string
-	BlockedCmds   []string
-	User          string // unix username for user mode
-	ContainerName string // read once at startup for container mode
+	Mode           SandboxMode
+	AllowedPaths   []string
+	BlockedCmds    []string
+	User           string // unix username for user mode
+	ContainerName  string // read once at startup for container mode
+	MaxOutputBytes int    // cap on CombinedOutput; 0 uses DefaultMaxOutputBytes
 }
 
 // Sandbox executes shell commands subject to the configured policy.
@@ -92,6 +96,17 @@ func truncateSandbox(s string, n int) string {
 	return s[:n] + "…"
 }
 
+func (s *Sandbox) capOutput(out []byte) string {
+	limit := s.cfg.MaxOutputBytes
+	if limit <= 0 {
+		limit = DefaultMaxOutputBytes
+	}
+	if len(out) <= limit {
+		return s.capOutput(out)
+	}
+	return string(out[:limit]) + fmt.Sprintf("\n[output truncated at %d bytes]", limit)
+}
+
 func (s *Sandbox) execPermissive(ctx context.Context, command string) (string, error) {
 	if err := s.checkAllowedPaths(command); err != nil {
 		return "", err
@@ -99,9 +114,9 @@ func (s *Sandbox) execPermissive(ctx context.Context, command string) (string, e
 	slog.Debug("sandbox exec", "mode", "permissive", "cmd", truncateSandbox(command, 80))
 	out, err := exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("exec: %w", err)
+		return s.capOutput(out), fmt.Errorf("exec: %w", err)
 	}
-	return string(out), nil
+	return s.capOutput(out), nil
 }
 
 // checkAllowedPaths enforces AllowedPaths in permissive mode.
@@ -184,9 +199,9 @@ func (s *Sandbox) execAsUser(ctx context.Context, command string) (string, error
 	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("exec as user %s: %w", s.cfg.User, err)
+		return s.capOutput(out), fmt.Errorf("exec as user %s: %w", s.cfg.User, err)
 	}
-	return string(out), nil
+	return s.capOutput(out), nil
 }
 
 func (s *Sandbox) execInContainer(ctx context.Context, command string) (string, error) {
@@ -197,7 +212,7 @@ func (s *Sandbox) execInContainer(ctx context.Context, command string) (string, 
 	cmd := exec.CommandContext(ctx, "docker", "exec", s.cfg.ContainerName, "sh", "-c", command)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return string(out), fmt.Errorf("docker exec: %w", err)
+		return s.capOutput(out), fmt.Errorf("docker exec: %w", err)
 	}
-	return string(out), nil
+	return s.capOutput(out), nil
 }
