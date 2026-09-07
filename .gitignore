@@ -55,3 +55,4 @@ config/channels.json
 # .idea/
 # .vscode/
 .claude/
+agent

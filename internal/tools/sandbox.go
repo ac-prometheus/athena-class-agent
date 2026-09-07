@@ -102,7 +102,7 @@ func (s *Sandbox) capOutput(out []byte) string {
 		limit = DefaultMaxOutputBytes
 	}
 	if len(out) <= limit {
-		return s.capOutput(out)
+		return string(out)
 	}
 	return string(out[:limit]) + fmt.Sprintf("\n[output truncated at %d bytes]", limit)
 }
